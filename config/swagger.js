@@ -14,11 +14,14 @@ const options = {
         url: 'http://localhost:3000',
         description: '개발 서버',
       },
+      {
+        url: 'https://malmungchi-server.onrender.com',
+        description: 'Render 배포 서버',
+      },
     ],
   },
-  apis: ['./routes/*.js'], // 📌 라우트 파일에서 Swagger 주석을 읽어옴
+  apis: ['./routes/*.js'], // ✅ 라우트 파일에서 Swagger 주석 읽음
 };
 
 const specs = swaggerJsdoc(options);
-
 module.exports = { swaggerUi, specs };

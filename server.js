@@ -1,9 +1,9 @@
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const fs = require('fs');
-const path = require('path');
 const { swaggerUi, specs } = require('./config/swagger');
 const pool = require('./config/db');
 dotenv.config();

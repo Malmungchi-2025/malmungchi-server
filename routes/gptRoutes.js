@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { generateQuote } = require('../controllers/gptController');
+const { generateQuote, getWordDefinition } = require('../controllers/gptController');
 
 /**
  * @swagger
@@ -14,7 +14,16 @@ const { generateQuote } = require('../controllers/gptController');
  */
 router.post('/generate-quote', generateQuote);
 
-const { getWordDefinition } = require('../controllers/gptController');
+/**
+ * @swagger
+ * /api/gpt/word-definition:
+ *   post:
+ *     summary: 단어 정의 및 예문 조회 + DB 저장
+ *     tags: [GPT]
+ *     responses:
+ *       200:
+ *         description: 단어 정보 반환
+ */
 router.post('/word-definition', getWordDefinition);
 
 module.exports = router;
