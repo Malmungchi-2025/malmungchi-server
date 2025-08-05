@@ -1,12 +1,13 @@
+const dotenv = require('dotenv');
+dotenv.config(); // ✅ 최상단에서 가장 먼저 실행
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
-const dotenv = require('dotenv');
+
 const { swaggerUi, specs } = require('./config/swagger');
 const pool = require('./config/db');
-dotenv.config();
 
 const app = express();
 app.use(cors());
