@@ -10,15 +10,15 @@ const options = {
       description: '📚 Malmungchi 프로젝트 API 명세서',
     },
     servers: [
-      {
-        url: 'http://localhost:3000',
-        description: '개발 서버',
-      },
-      {
-        url: 'https://malmungchi-server.onrender.com',
-        description: 'Render 배포 서버',
-      },
-    ],
+  {
+    url: 'https://malmungchi-server.onrender.com', // ✅ Render 서버를 첫 번째
+    description: 'Render 배포 서버',
+  },
+  {
+    url: 'http://localhost:3000',
+    description: '개발 서버',
+  },
+],
   },
   apis: ['./routes/*.js'], // ✅ 라우트 파일에서 Swagger 주석 읽음
 };
