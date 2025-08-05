@@ -1,7 +1,5 @@
-const { Pool } = require('pg');
 const axios = require('axios');
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
+const pool = require('../config/db');  // ✅ 공용 pool 사용
 /**
  * 1. 오늘의 학습 글감 생성 API
  * POST /api/gpt/generate-quote
