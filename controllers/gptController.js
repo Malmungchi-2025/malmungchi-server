@@ -14,8 +14,13 @@ exports.generateQuote = async (req, res) => {
     const existing = await pool.query(checkQuery, [today, userId]);
 
     if (existing.rows.length > 0) {
-      return res.json({ success: true, result: existing.rows[0].content });
-    }
+  // 기존 데이터 반환 시 studyId 포함
+  return res.json({ 
+    success: true, 
+    result: existing.rows[0].content, 
+    studyId: existing.rows[0].study_id 
+  });
+}
 
     // 2. GPT 호출
     const prompt = `
