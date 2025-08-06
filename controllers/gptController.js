@@ -164,3 +164,26 @@ exports.getVocabularyByStudy = async (req, res) => {
     res.status(500).json({ success: false, message: '단어 조회 실패' });
   }
 };
+/**
+ * ✅ 5. 필사 내용 저장 API
+ * POST /api/study/handwriting
+ */
+exports.saveHandwriting = async (req, res) => {
+  const { study_id, content } = req.body;
+  const userId = req.user?.id || null;
+
+  if (!study_id || !content) {
+    return res.status(400).json({ success: false, message: "필수 값 누락" });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE today_study SET handwriting = $1 WHERE study_id = $2 AND user_id IS NOT DISTINCT FROM $3`,
+      [content, study_id, userId]
+    );
+    res.json({ success: true, message: "필사 내용 저장 완료" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "필사 저장 실패" });
+  }
+};
