@@ -187,3 +187,28 @@ exports.saveHandwriting = async (req, res) => {
     res.status(500).json({ success: false, message: "필사 저장 실패" });
   }
 };
+
+/**
+ * ✅ 6. 필사 내용 조회 API
+ * GET /api/study/handwriting/:studyId
+ */
+exports.getHandwriting = async (req, res) => {
+  const { studyId } = req.params;
+  const userId = req.user?.id || null;
+
+  try {
+    const result = await pool.query(
+      `SELECT handwriting FROM today_study WHERE study_id = $1 AND user_id IS NOT DISTINCT FROM $2 LIMIT 1`,
+      [studyId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, result: "" }); // ✅ 필사 내용이 없으면 빈 문자열 반환
+    }
+
+    res.json({ success: true, result: result.rows[0].handwriting });
+  } catch (err) {
+    console.error("필사 내용 조회 실패:", err.message);
+    res.status(500).json({ success: false, message: "필사 내용 조회 실패" });
+  }
+};
