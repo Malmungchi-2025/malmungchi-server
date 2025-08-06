@@ -50,7 +50,8 @@ exports.generateQuote = async (req, res) => {
     // 4. 글에서 단어 추출 & vocabulary 저장 (자동)
     await saveVocabulary(studyId, generatedText);
 
-    res.json({ success: true, result: generatedText });
+    // 새로운 글감 생성 후 studyId도 포함
+    res.json({ success: true, result: generatedText, studyId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'GPT API 오류' });
@@ -153,7 +154,11 @@ exports.getVocabularyByStudy = async (req, res) => {
       `SELECT word, meaning, example FROM vocabulary WHERE study_id = $1`,
       [studyId]
     );
-    res.json({ success: true, words: result.rows });
+    res.json({
+      success: true,
+      result: result.rows,   // ✅ 프론트가 기대하는 필드명으로 변경
+      message: null
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: '단어 조회 실패' });
