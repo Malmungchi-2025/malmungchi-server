@@ -9,20 +9,20 @@ exports.generateQuote = async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
 
   try {
-    // 1. 오늘 글감 있는지 체크
-    const checkQuery = `SELECT * FROM today_study WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2 LIMIT 1`;
-    const existing = await pool.query(checkQuery, [today, userId]);
+    // ✅ userId가 없으면 무조건 새로 생성
+    if (userId) {
+      const checkQuery = `SELECT * FROM today_study WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2 LIMIT 1`;
+      const existing = await pool.query(checkQuery, [today, userId]);
+      if (existing.rows.length > 0) {
+        return res.json({
+          success: true,
+          result: existing.rows[0].content,
+          studyId: existing.rows[0].study_id
+        });
+      }
+    }
 
-    if (existing.rows.length > 0) {
-  // 기존 데이터 반환 시 studyId 포함
-  return res.json({ 
-    success: true, 
-    result: existing.rows[0].content, 
-    studyId: existing.rows[0].study_id 
-  });
-}
-
-    // 2. GPT 호출
+    // ✅ GPT 호출
     const prompt = `
       20대 사회초년생을 위한 문해력 학습용 글을 작성해줘.
       조건: 쉬운 단어, 480~520자, 직장/일상/친구/습관 주제.
@@ -38,7 +38,7 @@ exports.generateQuote = async (req, res) => {
 
     const generatedText = gptRes.data.choices[0].message.content;
 
-    // 3. DB 저장
+    // ✅ DB 저장
     const insertQuery = `
       INSERT INTO today_study (user_id, content, date)
       VALUES ($1, $2, $3)
@@ -47,10 +47,9 @@ exports.generateQuote = async (req, res) => {
     const inserted = await pool.query(insertQuery, [userId, generatedText, today]);
     const studyId = inserted.rows[0].study_id;
 
-    // 4. 글에서 단어 추출 & vocabulary 저장 (자동)
+    // ✅ 단어 저장 로직
     await saveVocabulary(studyId, generatedText);
 
-    // 새로운 글감 생성 후 studyId도 포함
     res.json({ success: true, result: generatedText, studyId });
   } catch (err) {
     console.error(err);
@@ -300,7 +299,7 @@ exports.generateQuiz = async (req, res) => {
         [
           studyId,
           i + 1,
-          q.type,
+          q.type,        // ✨ 바로 여기! GPT가 반환한 문제 유형을 저장하려고 함
           q.question,
           q.options,
           q.answer,
