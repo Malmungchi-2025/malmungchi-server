@@ -13,7 +13,7 @@ const gptController = require('../controllers/gptController');
  *       200:
  *         description: 글귀 생성 성공
  */
-router.post('/generate-quote', generateQuote);
+router.post('/generate-quote', gptController.generateQuote);
 
 /**
  * @swagger
@@ -35,7 +35,7 @@ router.post('/generate-quote', generateQuote);
  *       200:
  *         description: 단어 정보 반환
  */
-router.post('/vocabulary/search', searchWordDefinition);
+router.post('/vocabulary/search', gptController.searchWordDefinition);
 
 /**
  * @swagger
@@ -66,7 +66,7 @@ router.post('/vocabulary/search', searchWordDefinition);
  *       200:
  *         description: 단어 저장 성공
  */
-router.post('/vocabulary', saveVocabularyManual);
+router.post('/vocabulary', gptController.saveVocabularyManual);
 
 /**
  * @swagger
@@ -84,7 +84,7 @@ router.post('/vocabulary', saveVocabularyManual);
  *       200:
  *         description: 단어 목록 반환
  */
-router.get('/vocabulary/:studyId', getVocabularyByStudy);
+router.get('/vocabulary/:studyId', gptController.getVocabularyByStudy);
 
 //퀴즈 생성
 /**
