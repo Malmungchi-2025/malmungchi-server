@@ -10,16 +10,19 @@ exports.generateQuote = async (req, res) => {
 
   try {
     // ✅ userId가 없으면 무조건 새로 생성
-    if (userId) {
-      const checkQuery = `SELECT * FROM today_study WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2 LIMIT 1`;
-      const existing = await pool.query(checkQuery, [today, userId]);
-      if (existing.rows.length > 0) {
-        return res.json({
-          success: true,
-          result: existing.rows[0].content,
-          studyId: existing.rows[0].study_id
-        });
-      }
+    const checkQuery = `
+      SELECT * FROM today_study 
+      WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2 
+      LIMIT 1
+    `;
+    const existing = await pool.query(checkQuery, [today, userId]);
+
+    if (existing.rows.length > 0) {
+      return res.json({
+        success: true,
+        result: existing.rows[0].content,
+        studyId: existing.rows[0].study_id
+      });
     }
 
     // ✅ GPT 호출
@@ -299,14 +302,14 @@ exports.generateQuiz = async (req, res) => {
         [
           studyId,
           i + 1,
-          q.type,        // ✨ 바로 여기! GPT가 반환한 문제 유형을 저장하려고 함
+          q.type || '유형 없음',
           q.question,
-          q.options,
+          JSON.stringify(q.options),  // ✅ 핵심 수정
           q.answer,
           q.explanation
         ]
       );
-    }
+}
 
     res.json({ success: true, quizzes });
 
