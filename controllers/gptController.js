@@ -216,6 +216,7 @@ exports.getHandwriting = async (req, res) => {
 };
 
 /*gpt로 퀴즈 생성 */
+// ✅ 퀴즈 생성 (중복이면 기존 리스트 반환)
 exports.generateQuiz = async (req, res) => {
   const { text, studyId } = req.body;
 
@@ -224,46 +225,32 @@ exports.generateQuiz = async (req, res) => {
   }
 
   try {
-    // ✅ 중복 생성 방지
-    const existing = await pool.query(
-      `SELECT 1 FROM quiz_set WHERE study_id = $1 LIMIT 1`,
+    // 1) 기존 퀴즈 있으면 그대로 반환 (200)
+    const existed = await pool.query(
+      `SELECT question_index, question, options, answer, explanation
+       FROM quiz_set
+       WHERE study_id = $1
+       ORDER BY question_index`,
       [studyId]
     );
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ success: false, message: '이미 퀴즈가 생성되어 있습니다.' });
+    if (existed.rows.length > 0) {
+      const quizzes = existed.rows.map(r => ({
+        questionIndex: r.question_index,
+        question: r.question,
+        options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+        answer: r.answer,
+        explanation: r.explanation
+      }));
+      return res.json({ success: true, result: quizzes });
     }
 
+    // 2) GPT 호출
     const prompt = `
 너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩 골라서**, 각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
-
-[문제 유형]
-1. 이 글의 핵심 내용을 가장 잘 요약한 것은?
-2. 이 글을 읽고 추론할 수 있는 것은?
-3. 이 글의 가장 적절한 제목을 선택하시오.
-4. 이 글의 가장 적절한 결론은?
-5. 해당 문장에 쓰인 단어와 같은 의미로 사용된 문장은?
-
-[출력 형식]
-[
-  {
-    "type": "이 글의 가장 적절한 결론은?",
-    "question": "글의 마지막에서 강조된 삶의 태도는 무엇인가?",
-    "options": ["포기", "도전", "불안", "냉소"],
-    "answer": "도전",
-    "explanation": "글의 결말에서 도전하는 자세가 중요하다고 강조했기 때문입니다."
-  },
-  ...
-]
-
-[반드시 지켜야 할 조건]
-- JSON 배열로만 출력할 것 (그 외 설명 절대 X)
-- 각 문제는 서로 다른 유형이어야 함
-- options는 무조건 4개이며 answer는 그 중 하나
-- **question은 반드시 유형에 맞는 자연스러운 한 문장**으로 작성 (부가설명·번호 금지)
-- **question에 "1/3", "2/3" 같은 숫자 포함 금지**
-- type은 유지하되 화면에는 표시하지 않을 예정이므로, 실제 질문은 question에만 들어가야 함
-
-다음 글을 기반으로 문제를 생성해줘:
+[문제 유형] 1~5 ...
+[출력 형식] [{"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."}]
+[조건] JSON 배열만, 각 문제 유형은 서로 달라야 함, options 4개, answer는 그 중 하나, question은 한 문장
+원문:
 """${text}"""
 `;
 
@@ -282,81 +269,259 @@ exports.generateQuiz = async (req, res) => {
       }
     );
 
-    const raw = gptRes.data.choices[0].message.content;
-
+    const raw = gptRes.data.choices?.[0]?.message?.content ?? '';
     let quizzes;
     try {
       quizzes = JSON.parse(raw);
-    } catch (err) {
+    } catch (e) {
       console.error('❌ GPT 응답 파싱 실패:', raw);
-      return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.', raw });
+      return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.' });
     }
 
-    // ✅ DB 저장
+    // 3) DB 저장 (options는 jsonb로)
     for (let i = 0; i < quizzes.length; i++) {
       const q = quizzes[i];
       await pool.query(
         `INSERT INTO quiz_set (
-          study_id, question_index, type, question, options, answer, explanation
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+           study_id, question_index, type, question, options, answer, explanation
+         ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
         [
           studyId,
           i + 1,
           q.type || '유형 없음',
           q.question,
-          JSON.stringify(q.options),  // ✅ 핵심 수정
+          JSON.stringify(q.options || []),
           q.answer,
           q.explanation
         ]
       );
-}
+    }
 
-    res.json({ success: true, quizzes });
+    // 4) 생성 직후에도 동일 포맷 반환
+    const saved = await pool.query(
+      `SELECT question_index, question, options, answer, explanation
+       FROM quiz_set
+       WHERE study_id = $1
+       ORDER BY question_index`,
+      [studyId]
+    );
+    const result = saved.rows.map(r => ({
+      questionIndex: r.question_index,
+      question: r.question,
+      options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+      answer: r.answer,
+      explanation: r.explanation
+    }));
 
+    return res.json({ success: true, result });
   } catch (err) {
-    console.error('❌ GPT API 오류:', err.message);
+    console.error('❌ 퀴즈 생성 실패:', err.message);
     res.status(500).json({ success: false, message: '퀴즈 생성 실패' });
   }
 };
+// exports.generateQuiz = async (req, res) => {
+//   const { text, studyId } = req.body;
+
+//   if (!text || !studyId) {
+//     return res.status(400).json({ success: false, message: 'text 또는 studyId가 필요합니다.' });
+//   }
+
+//   try {
+//     // ✅ 중복 생성 방지
+//     const existing = await pool.query(
+//       `SELECT 1 FROM quiz_set WHERE study_id = $1 LIMIT 1`,
+//       [studyId]
+//     );
+//     if (existing.rows.length > 0) {
+//       return res.status(400).json({ success: false, message: '이미 퀴즈가 생성되어 있습니다.' });
+//     }
+
+//     const prompt = `
+// 너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩 골라서**, 각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
+
+// [문제 유형]
+// 1. 이 글의 핵심 내용을 가장 잘 요약한 것은?
+// 2. 이 글을 읽고 추론할 수 있는 것은?
+// 3. 이 글의 가장 적절한 제목을 선택하시오.
+// 4. 이 글의 가장 적절한 결론은?
+// 5. 해당 문장에 쓰인 단어와 같은 의미로 사용된 문장은?
+
+// [출력 형식]
+// [
+//   {
+//     "type": "이 글의 가장 적절한 결론은?",
+//     "question": "글의 마지막에서 강조된 삶의 태도는 무엇인가?",
+//     "options": ["포기", "도전", "불안", "냉소"],
+//     "answer": "도전",
+//     "explanation": "글의 결말에서 도전하는 자세가 중요하다고 강조했기 때문입니다."
+//   },
+//   ...
+// ]
+
+// [반드시 지켜야 할 조건]
+// - JSON 배열로만 출력할 것 (그 외 설명 절대 X)
+// - 각 문제는 서로 다른 유형이어야 함
+// - options는 무조건 4개이며 answer는 그 중 하나
+// - **question은 반드시 유형에 맞는 자연스러운 한 문장**으로 작성 (부가설명·번호 금지)
+// - **question에 "1/3", "2/3" 같은 숫자 포함 금지**
+// - type은 유지하되 화면에는 표시하지 않을 예정이므로, 실제 질문은 question에만 들어가야 함
+
+// 다음 글을 기반으로 문제를 생성해줘:
+// """${text}"""
+// `;
+
+//     const gptRes = await axios.post(
+//       'https://api.openai.com/v1/chat/completions',
+//       {
+//         model: 'gpt-3.5-turbo',
+//         messages: [{ role: 'user', content: prompt }],
+//         temperature: 0.7
+//       },
+//       {
+//         headers: {
+//           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+//           'Content-Type': 'application/json'
+//         }
+//       }
+//     );
+
+//     const raw = gptRes.data.choices[0].message.content;
+
+//     let quizzes;
+//     try {
+//       quizzes = JSON.parse(raw);
+//     } catch (err) {
+//       console.error('❌ GPT 응답 파싱 실패:', raw);
+//       return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.', raw });
+//     }
+
+//     // ✅ DB 저장
+//     for (let i = 0; i < quizzes.length; i++) {
+//       const q = quizzes[i];
+//       await pool.query(
+//         `INSERT INTO quiz_set (
+//           study_id, question_index, type, question, options, answer, explanation
+//         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+//         [
+//           studyId,
+//           i + 1,
+//           q.type || '유형 없음',
+//           q.question,
+//           JSON.stringify(q.options),  // ✅ 핵심 수정
+//           q.answer,
+//           q.explanation
+//         ]
+//       );
+// }
+
+//     res.json({ success: true, quizzes });
+
+//   } catch (err) {
+//     console.error('❌ GPT API 오류:', err.message);
+//     res.status(500).json({ success: false, message: '퀴즈 생성 실패' });
+//   }
+// };
 
 //특정 학습 글의 퀴즈 모두 조회
+// exports.getQuizzesByStudyId = async (req, res) => {
+//   const { studyId } = req.params;
+
+//   try {
+//     const result = await pool.query(
+//       `SELECT question_index, question, options, answer, explanation FROM quiz_set WHERE study_id = $1 ORDER BY question_index`,
+//       [studyId]
+//     );
+
+//     const quizzes = result.rows.map(row => ({
+//       questionIndex: row.question_index,
+//       question: row.question,
+//       options: row.options,
+//       answer: row.answer,
+//       explanation: row.explanation
+//     }));
+
+//     res.json({ success: true, quizzes });
+//   } catch (err) {
+//     console.error('❌ 퀴즈 조회 실패:', err.message);
+//     res.status(500).json({ success: false, message: '퀴즈 조회 실패' });
+//   }
+// };
+
+// //퀴즈에 대한 사용자의 응답 저장
+// exports.saveQuizAnswer = async (req, res) => {
+//   const { studyId, questionIndex, userChoice, isCorrect } = req.body;
+
+//   if (!studyId || !questionIndex || !userChoice || isCorrect == null) {
+//     return res.status(400).json({ success: false, message: '필수 값 누락' });
+//   }
+
+//   try {
+//     await pool.query(
+//       `UPDATE quiz_set
+//        SET user_choice = $1,
+//            is_correct = $2
+//        WHERE study_id = $3 AND question_index = $4`,
+//       [userChoice, isCorrect, studyId, questionIndex]
+//     );
+
+//     res.json({ success: true, message: '응답 저장 완료' });
+//   } catch (err) {
+//     console.error('❌ 응답 저장 실패:', err.message);
+//     res.status(500).json({ success: false, message: '응답 저장 실패' });
+//   }
+// };
+// 퀴즈 조회
 exports.getQuizzesByStudyId = async (req, res) => {
   const { studyId } = req.params;
 
   try {
-    const result = await pool.query(
-      `SELECT question_index, question, options, answer, explanation FROM quiz_set WHERE study_id = $1 ORDER BY question_index`,
+    const db = await pool.query(
+      `SELECT question_index, question, options, answer, explanation
+       FROM quiz_set
+       WHERE study_id = $1
+       ORDER BY question_index`,
       [studyId]
     );
 
-    const quizzes = result.rows.map(row => ({
-      questionIndex: row.question_index,
-      question: row.question,
-      options: row.options,
-      answer: row.answer,
-      explanation: row.explanation
+    const quizzes = db.rows.map(r => ({
+      questionIndex: r.question_index,
+      question: r.question,
+      options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+      answer: r.answer,
+      explanation: r.explanation
     }));
 
-    res.json({ success: true, quizzes });
+    res.json({ success: true, result: quizzes });
   } catch (err) {
     console.error('❌ 퀴즈 조회 실패:', err.message);
     res.status(500).json({ success: false, message: '퀴즈 조회 실패' });
   }
 };
-
-//퀴즈에 대한 사용자의 응답 저장
+// 사용자 응답 저장 (서버 채점)
 exports.saveQuizAnswer = async (req, res) => {
-  const { studyId, questionIndex, userChoice, isCorrect } = req.body;
+  const { studyId, questionIndex, userChoice } = req.body;
 
-  if (!studyId || !questionIndex || !userChoice || isCorrect == null) {
+  if (!studyId || !questionIndex || !userChoice) {
     return res.status(400).json({ success: false, message: '필수 값 누락' });
   }
 
   try {
+    // 정답 조회
+    const row = await pool.query(
+      `SELECT answer FROM quiz_set WHERE study_id = $1 AND question_index = $2 LIMIT 1`,
+      [studyId, questionIndex]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, message: '문항 없음' });
+    }
+
+    const correct = row.rows[0].answer;
+    const isCorrect = userChoice === correct;
+
     await pool.query(
       `UPDATE quiz_set
-       SET user_choice = $1,
-           is_correct = $2
+         SET user_choice = $1,
+             is_correct = $2
        WHERE study_id = $3 AND question_index = $4`,
       [userChoice, isCorrect, studyId, questionIndex]
     );
