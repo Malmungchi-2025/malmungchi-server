@@ -1,18 +1,30 @@
 const axios = require('axios');
 const pool = require('../config/db');  // ✅ 공용 pool 사용
+
+//1) KST 기준으로 “오늘” 계산 + 하루 1개 보장 (UPSERT)
+function getKstToday() {
+  // KST(UTC+9) 기준 yyyy-mm-dd
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+  return fmt.format(new Date()); // e.g., "2025-08-12"
+}
+
 /**
  * 1. 오늘의 학습 글감 생성 API
  * POST /api/gpt/generate-quote
  */
 exports.generateQuote = async (req, res) => {
   const userId = req.user?.id || null;
-  const today = new Date().toISOString().split('T')[0];
+  // const today = new Date().toISOString().split('T')[0];
+  const today = getKstToday(); // ✅ KST 기준 날짜
 
-  try {
-    // ✅ userId가 없으면 무조건 새로 생성
+   try {
+    // ✅ KST 오늘 기준으로 조회
     const checkQuery = `
-      SELECT * FROM today_study 
-      WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2 
+      SELECT study_id, content FROM today_study
+      WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2
       LIMIT 1
     `;
     const existing = await pool.query(checkQuery, [today, userId]);
@@ -40,11 +52,22 @@ exports.generateQuote = async (req, res) => {
     );
 
     const generatedText = gptRes.data.choices[0].message.content;
+    
 
-    // ✅ DB 저장
+    // // ✅ DB 저장
+    // const insertQuery = `
+    //   INSERT INTO today_study (user_id, content, date)
+    //   VALUES ($1, $2, $3)
+    //   RETURNING study_id
+    // `;
+    // ✅ 하루 1개 보장: (user_id, date) 유니크 + UPSERT
+    //   - 먼저 유니크 제약 권장:
+    //     ALTER TABLE today_study ADD CONSTRAINT uq_today UNIQUE (user_id, date);
     const insertQuery = `
       INSERT INTO today_study (user_id, content, date)
       VALUES ($1, $2, $3)
+      ON CONFLICT (user_id, date)
+      DO UPDATE SET content = EXCLUDED.content
       RETURNING study_id
     `;
     const inserted = await pool.query(insertQuery, [userId, generatedText, today]);
@@ -123,19 +146,44 @@ exports.searchWordDefinition = async (req, res) => {
   }
 };
 
+// controllers/gptController.js (헬퍼: 오늘의 study_id 조회)
+async function getTodayStudyIdOrNull(userId) {
+  const today = getKstToday();
+  const q = `
+    SELECT study_id FROM today_study
+    WHERE date = $1 AND user_id IS NOT DISTINCT FROM $2
+    LIMIT 1
+  `;
+  const r = await pool.query(q, [today, userId]);
+  return r.rows[0]?.study_id ?? null;
+}
+
 /**
  * 3. 단어 저장 API (프론트에서 저장 버튼 클릭 시 호출)
  * POST /api/vocabulary
  */
 exports.saveVocabularyManual = async (req, res) => {
-  const { study_id, word, meaning, example } = req.body;
-  if (!study_id || !word || !meaning) {
+  let { study_id, word, meaning, example } = req.body;
+  const userId = req.user?.id || null;
+
+  if (!word || !meaning) {
     return res.status(400).json({ success: false, message: '필수 값 누락' });
   }
 
   try {
+    // ✅ study_id가 없거나, 오늘 글감이 따로 있으면 "오늘의 study_id"로 보정
+    const todayStudyId = await getTodayStudyIdOrNull(userId);
+    if (!study_id || (todayStudyId && study_id != todayStudyId)) {
+      study_id = todayStudyId;
+    }
+
+    if (!study_id) {
+      return res.status(400).json({ success: false, message: '오늘의 학습이 없습니다. 먼저 글감을 생성하세요.' });
+    }
+
     await pool.query(
-      `INSERT INTO vocabulary (study_id, word, meaning, example) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO vocabulary (study_id, word, meaning, example)
+       VALUES ($1, $2, $3, $4)`,
       [study_id, word, meaning, example || null]
     );
     res.json({ success: true, message: '단어가 저장되었습니다.' });
@@ -144,6 +192,23 @@ exports.saveVocabularyManual = async (req, res) => {
     res.status(500).json({ success: false, message: '단어 저장 실패' });
   }
 };
+// exports.saveVocabularyManual = async (req, res) => {
+//   const { study_id, word, meaning, example } = req.body;
+//   if (!study_id || !word || !meaning) {
+//     return res.status(400).json({ success: false, message: '필수 값 누락' });
+//   }
+
+//   try {
+//     await pool.query(
+//       `INSERT INTO vocabulary (study_id, word, meaning, example) VALUES ($1, $2, $3, $4)`,
+//       [study_id, word, meaning, example || null]
+//     );
+//     res.json({ success: true, message: '단어가 저장되었습니다.' });
+//   } catch (err) {
+//     console.error(err.message);
+//     res.status(500).json({ success: false, message: '단어 저장 실패' });
+//   }
+// };
 
 /**
  * 4. 단어 목록 조회 API (특정 학습 문단의 단어들)
@@ -151,21 +216,48 @@ exports.saveVocabularyManual = async (req, res) => {
  */
 exports.getVocabularyByStudy = async (req, res) => {
   const { studyId } = req.params;
+  const { today: todayOnly } = req.query; // today=1 이면 오늘 기준 강제
+  const userId = req.user?.id || null;
+
   try {
+    let targetStudyId = studyId;
+
+    if (todayOnly === '1') {
+      // ✅ 오늘의 studyId 강제 사용
+      const sid = await getTodayStudyIdOrNull(userId);
+      if (sid) targetStudyId = sid;
+    }
+
     const result = await pool.query(
-      `SELECT word, meaning, example FROM vocabulary WHERE study_id = $1`,
-      [studyId]
+      `SELECT word, meaning, example
+         FROM vocabulary
+       WHERE study_id = $1`,
+      [targetStudyId]
     );
-    res.json({
-      success: true,
-      result: result.rows,   // ✅ 프론트가 기대하는 필드명으로 변경
-      message: null
-    });
+
+    res.json({ success: true, result: result.rows, message: null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: '단어 조회 실패' });
   }
 };
+// exports.getVocabularyByStudy = async (req, res) => {
+//   const { studyId } = req.params;
+//   try {
+//     const result = await pool.query(
+//       `SELECT word, meaning, example FROM vocabulary WHERE study_id = $1`,
+//       [studyId]
+//     );
+//     res.json({
+//       success: true,
+//       result: result.rows,   // ✅ 프론트가 기대하는 필드명으로 변경
+//       message: null
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: '단어 조회 실패' });
+//   }
+// };
 /**
  * ✅ 5. 필사 내용 저장 API
  * POST /api/study/handwriting
@@ -476,10 +568,11 @@ exports.getQuizzesByStudyId = async (req, res) => {
 
   try {
     const db = await pool.query(
-      `SELECT question_index, question, options, answer, explanation
-       FROM quiz_set
-       WHERE study_id = $1
-       ORDER BY question_index`,
+      `SELECT question_index, question, options, answer, explanation,
+              user_choice, is_correct
+         FROM quiz_set
+        WHERE study_id = $1
+        ORDER BY question_index`,
       [studyId]
     );
 
@@ -488,7 +581,10 @@ exports.getQuizzesByStudyId = async (req, res) => {
       question: r.question,
       options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
       answer: r.answer,
-      explanation: r.explanation
+      explanation: r.explanation,
+      // ★ 추가 필드
+      userChoice: r.user_choice,                     // string | null
+      isCorrect: typeof r.is_correct === 'boolean' ? r.is_correct : null // boolean | null
     }));
 
     res.json({ success: true, result: quizzes });
@@ -497,6 +593,32 @@ exports.getQuizzesByStudyId = async (req, res) => {
     res.status(500).json({ success: false, message: '퀴즈 조회 실패' });
   }
 };
+// exports.getQuizzesByStudyId = async (req, res) => {
+//   const { studyId } = req.params;
+
+//   try {
+//     const db = await pool.query(
+//       `SELECT question_index, question, options, answer, explanation
+//        FROM quiz_set
+//        WHERE study_id = $1
+//        ORDER BY question_index`,
+//       [studyId]
+//     );
+
+//     const quizzes = db.rows.map(r => ({
+//       questionIndex: r.question_index,
+//       question: r.question,
+//       options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+//       answer: r.answer,
+//       explanation: r.explanation
+//     }));
+
+//     res.json({ success: true, result: quizzes });
+//   } catch (err) {
+//     console.error('❌ 퀴즈 조회 실패:', err.message);
+//     res.status(500).json({ success: false, message: '퀴즈 조회 실패' });
+//   }
+// };
 // 사용자 응답 저장 (서버 채점)
 exports.saveQuizAnswer = async (req, res) => {
   const { studyId, questionIndex, userChoice } = req.body;
