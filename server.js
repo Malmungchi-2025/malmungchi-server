@@ -16,6 +16,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 app.get('/', (req, res) => res.send('🚀 Malmungchi Server is running...'));
 
+const authDevRoutes = require('./routes/authDevRoutes');
+app.use('/api/auth', authDevRoutes);
+
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
 
