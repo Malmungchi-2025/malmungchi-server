@@ -12,8 +12,8 @@ const {
 } = require('../controllers/authController');
 
 // 미들웨어 (폴더명이 middlewares 라서 경로 주의!)
-const auth = require('../middlewares/auth');          // Bearer 토큰 파싱 → req.user
-const { requireLogin } = require('../middlewares/auth'); // 401 가드 (auth에서 export)
+ const { auth, requireLogin } = require('../middlewares/auth');
+//const { requireLogin } = require('../middlewares/auth'); // 401 가드 (auth에서 export)
 
 /**
  * @swagger
