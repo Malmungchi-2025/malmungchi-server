@@ -11,10 +11,12 @@ const {
   me,
 } = require('../controllers/authController');
 
-// 미들웨어 (폴더명이 middlewares 라서 경로 주의!)
- const { auth, requireLogin } = require('../middlewares/auth');
-//const { requireLogin } = require('../middlewares/auth'); // 401 가드 (auth에서 export)
 
+// 미들웨어 (폴더명이 middlewares 라서 경로 주의!)
+const { auth, requireLogin } = require('../middlewares/auth');
+
+// 예: 보호된 라우트
+router.post('/your-protected-endpoint', auth, requireLogin, controllerFn);
 /**
  * @swagger
  * tags:
