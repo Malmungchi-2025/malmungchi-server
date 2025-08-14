@@ -1,19 +1,27 @@
 // middlewares/auth.js
+const jwt = require('jsonwebtoken');
+const pool = require('../config/db');
 
-// 토큰 파싱 (req.user 세팅)
-const auth = (req, res, next) => {
-  // ... Bearer 파싱 로직 ...
-  // req.user = { id: ... } (없으면 undefined)
-  next();
-};
-
-// 401 가드
-const requireLogin = (req, res, next) => {
-  if (!req.user?.id) {
-    return res.status(401).json({ success: false, message: '인증 필요' });
+module.exports = async function auth(req, _res, next) {
+  try {
+    const h = req.headers['authorization'] || '';
+    const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+    if (token) {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const { rows } = await pool.query(
+        'SELECT id, email, is_verified FROM users WHERE id=$1',
+        [payload.id]
+      );
+      if (rows[0]) {
+        req.user = {
+          id: rows[0].id,
+          email: rows[0].email,
+          isVerified: rows[0].is_verified,
+        };
+      }
+    }
+  } catch (e) {
+    // optional: console.warn('auth error', e);
   }
   next();
 };
-
-// ✅ 명시적 내보내기
-module.exports = { auth, requireLogin };
