@@ -4,11 +4,18 @@ const pool = require('../config/db');
 const { sign } = require('../utils/jwt');
 const { sendMail } = require('../utils/mailer');
 
-// 이메일 인증 토큰 생성 헬퍼
-async function issueEmailToken(userId) {
+// controllers/authController.js
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const pool = require('../config/db');
+const { sign } = require('../utils/jwt');
+const { sendMail } = require('../utils/mailer');
+
+// ✅ 같은 트랜잭션 client를 받도록 변경
+async function issueEmailToken(client, userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30분
-  await pool.query(
+  await client.query(
     `INSERT INTO email_verifications(user_id, token, expires_at)
      VALUES ($1, $2, $3)
      ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
@@ -16,6 +23,79 @@ async function issueEmailToken(userId) {
   );
   return token;
 }
+
+exports.register = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    let { email, password, name, nickname } = req.body || {};
+    if (!email || !password || !name) {
+      return res.status(400).json({ success:false, message:'이메일/비밀번호/이름이 필요합니다.' });
+    }
+    email = String(email).trim().toLowerCase();
+
+    const hash = await bcrypt.hash(password, 10);
+    await client.query('BEGIN');
+
+    const insertQ = `
+      INSERT INTO users (email, password, name, nickname, is_verified)
+      VALUES ($1, $2, $3, $4, false)
+      RETURNING id, email, name, nickname, is_verified
+    `;
+    let r;
+    try {
+      r = await client.query(insertQ, [email, hash, name, nickname ?? null]);
+    } catch (e) {
+      if (e?.code === '23505' && e?.constraint === 'users_email_key') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ success:false, message:'이미 가입된 이메일입니다.' });
+      }
+      if (e?.code === '23505' && e?.constraint === 'users_nickname_key') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ success:false, message:'이미 사용 중인 닉네임입니다.' });
+      }
+      throw e;
+    }
+
+    const user = r.rows[0];
+
+    // 🔴 FK 보장: 같은 client로 토큰 발급/저장
+    const token = await issueEmailToken(client, user.id);
+
+    // ✅ 트랜잭션 먼저 확정
+    await client.query('COMMIT');
+
+    // ✅ 커밋 후 메일 발송(실패해도 DB는 일관)
+    const link = `${process.env.APP_BASE_URL}/api/auth/verify-email?token=${token}`;
+    const mailed = await sendMail({
+      to: user.email,
+      subject: '[말뭉치] 이메일 인증을 완료해주세요',
+      html: `
+        <p>아래 버튼을 눌러 이메일 인증을 완료해주세요.</p>
+        <p><a href="${link}">이메일 인증</a></p>
+        <p>이 링크는 30분간 유효합니다.</p>
+      `
+    });
+
+    if (!mailed) {
+      // 메일 실패 시 사용자 가이던스 제공(로그는 mailer에서 자세히 남김)
+      return res.status(202).json({
+        success: true,
+        message: '가입은 완료되었습니다. 메일 발송에 문제가 있어 재전송을 시도해주세요.'
+      });
+    }
+
+    return res.json({ success:true, message:'회원가입 완료. 이메일을 확인해주세요.' });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('register error:', e);
+    res.status(500).json({ success:false, message:'회원가입 실패' });
+  } finally {
+    client.release();
+  }
+};
+
+// 이메일 인증 토큰 생성 헬퍼
+
 
 /**
  * 1) 회원가입
@@ -126,8 +206,9 @@ exports.verifyEmail = async (req, res) => {
  */
 exports.resendVerification = async (req, res) => {
   try {
-    const { email } = req.body || {};
+    let { email } = req.body || {};
     if (!email) return res.status(400).json({ success:false, message:'이메일이 필요합니다.' });
+    email = String(email).trim().toLowerCase();   // ✅ 정규화
 
     const u = await pool.query(`SELECT id, is_verified FROM users WHERE email = $1 LIMIT 1`, [email]);
     if (u.rows.length === 0) {
@@ -137,13 +218,26 @@ exports.resendVerification = async (req, res) => {
       return res.status(400).json({ success:false, message:'이미 인증된 계정입니다.' });
     }
 
-    const token = await issueEmailToken(u.rows[0].id);
+    // 토큰 발급은 독립 트랜잭션으로 OK (여기서는 client 필요 없음)
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
+    await pool.query(
+      `INSERT INTO email_verifications(user_id, token, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+      [u.rows[0].id, token, expiresAt]
+    );
+
     const link = `${process.env.APP_BASE_URL}/api/auth/verify-email?token=${token}`;
-    await sendMail({
+    const ok = await sendMail({
       to: email,
       subject: '[말뭉치] 이메일 인증 다시 보내기',
       html: `<p>다시 인증을 진행하려면 아래를 클릭하세요.</p><p><a href="${link}">이메일 인증</a></p>`
     });
+
+    if (!ok) {
+      return res.status(202).json({ success:true, message:'메일 발송에 문제가 있습니다. 잠시 후 다시 시도해주세요.' });
+    }
     res.json({ success:true, message:'인증 메일을 재전송했습니다.' });
   } catch (e) {
     console.error('resendVerification error:', e);
@@ -187,33 +281,6 @@ exports.login = async (req, res) => {
   }
 };
 
-exports.resendVerification = async (req, res) => {
-  try {
-    let { email } = req.body || {};
-    if (!email) return res.status(400).json({ success:false, message:'이메일이 필요합니다.' });
-    email = String(email).trim().toLowerCase();   // ✅ 정규화
-
-    const u = await pool.query(`SELECT id, is_verified FROM users WHERE email = $1 LIMIT 1`, [email]);
-    if (u.rows.length === 0) {
-      return res.status(404).json({ success:false, message:'가입되지 않은 이메일입니다.' });
-    }
-    if (u.rows[0].is_verified) {
-      return res.status(400).json({ success:false, message:'이미 인증된 계정입니다.' });
-    }
-
-    const token = await issueEmailToken(u.rows[0].id);
-    const link = `${process.env.APP_BASE_URL}/api/auth/verify-email?token=${token}`;
-    await sendMail({
-      to: email,
-      subject: '[말뭉치] 이메일 인증 다시 보내기',
-      html: `<p>다시 인증을 진행하려면 아래를 클릭하세요.</p><p><a href="${link}">이메일 인증</a></p>`
-    });
-    res.json({ success:true, message:'인증 메일을 재전송했습니다.' });
-  } catch (e) {
-    console.error('resendVerification error:', e);
-    res.status(500).json({ success:false, message:'재전송 실패' });
-  }
-};
 
 
 /**
