@@ -16,7 +16,7 @@ const {
 const { auth, requireLogin } = require('../middlewares/auth');
 
 // 예: 보호된 라우트
-router.post('/your-protected-endpoint', auth, requireLogin, controllerFn);
+//router.post('/your-protected-endpoint', auth, requireLogin, controllerFn);
 /**
  * @swagger
  * tags:
