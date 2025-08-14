@@ -1,9 +1,3 @@
-const bcrypt = require('bcrypt');
-const crypto = require('crypto');
-const pool = require('../config/db');
-const { sign } = require('../utils/jwt');
-const { sendMail } = require('../utils/mailer');
-
 // controllers/authController.js
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
