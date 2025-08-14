@@ -13,7 +13,8 @@ const {
 
 
 // 미들웨어 (폴더명이 middlewares 라서 경로 주의!)
-const { auth, requireLogin } = require('../middlewares/auth');
+const auth = require('../middlewares/auth');                    // ✅ 기본 내보내기(함수)
+const { requireLogin } = require('../middlewares/authGuard');   // ✅ named export
 
 // 예: 보호된 라우트
 //router.post('/your-protected-endpoint', auth, requireLogin, controllerFn);
