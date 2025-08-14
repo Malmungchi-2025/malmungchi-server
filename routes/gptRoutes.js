@@ -9,8 +9,9 @@ const gptController = require('../controllers/gptController');
 // const requireLogin = require('../middleware/requireLogin');
 
 // 예시 2) 토큰 파싱(auth) + 로그인필수(requireLogin) 분리된 경우:
-const auth = require('../middlewares/auth');              // req.user 채우기
-const { requireLogin } = require('../middlewares/authGuard'); // 401 처리
+const { auth, requireLogin } = require('../middlewares/auth');
+// const auth = require('../middlewares/auth');              // req.user 채우기
+// const { requireLogin } = require('../middlewares/authGuard'); // 401 처리
 
 // 🔒 이하 모든 GPT/Study/Vocabulary/Quiz API는 로그인 필수
 router.use(auth, requireLogin);
