@@ -225,14 +225,20 @@ exports.login = async (req, res) => {
 
 // 5) 내 정보
 exports.me = async (req, res) => {
-  if (!req.user?.id) return res.status(401).json({ success:false, message:'인증 필요' });
+  if (!req.user?.id) 
+    return res.status(401).json({ success:false, message:'인증 필요' });
+
   try {
     const r = await pool.query(
       `SELECT id, email, name, nickname, is_verified, created_at
        FROM users WHERE id = $1 LIMIT 1`,
       [req.user.id]
     );
-    res.json({ success:true, user: r.rows[0] || null });
+
+    res.json({ 
+      success: true, 
+      result: r.rows[0] || null  // ✅ result로 변경
+    });
   } catch (e) {
     console.error('me error:', e);
     res.status(500).json({ success:false, message:'조회 실패' });
