@@ -55,11 +55,17 @@ async function assertStudyOwnerOrThrow(studyId, userId) {
 async function saveVocabulary(studyId, content) {
   try {
     const prompt = `
-      다음 글에서 중요한 단어 5개를 선택하고,
-      각 단어의 정의와 예문을 JSON 배열 형식으로 반환해줘.
-      형식: [{"word":"단어","meaning":"정의","example":"예문"}, ...]
-      
-      글: ${content}
+다음 글에서 중요한 단어 5개를 선택하고,
+각 단어의 정의와 예문을 **JSON 배열만** 반환해줘.
+**코드블록/설명/마크다운 금지**. 예시 형식:
+[
+  {"word":"", "meaning":"", "example":""},
+  {"word":"", "meaning":"", "example":""},
+  {"word":"", "meaning":"", "example":""},
+  {"word":"", "meaning":"", "example":""},
+  {"word":"", "meaning":"", "example":""}
+]
+글: ${content}
     `;
 
     const gptRes = await axios.post(
@@ -67,17 +73,24 @@ async function saveVocabulary(studyId, content) {
       {
         model: 'gpt-3.5-turbo',
         messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7
       },
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
 
-    const words = JSON.parse(gptRes.data.choices[0].message.content);
+    const raw = gptRes.data.choices?.[0]?.message?.content ?? '';
+    let words = parseJsonLoose(raw);
+    if (!Array.isArray(words)) words = [words];
 
+    // 🔒 중복 방지: (study_id, word) 유니크 권장
     for (const w of words) {
       await pool.query(
         `INSERT INTO vocabulary (study_id, word, meaning, example)
-         VALUES ($1, $2, $3, $4)`,
-        [studyId, w.word, w.meaning, w.example]
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (study_id, word) DO UPDATE
+           SET meaning = EXCLUDED.meaning,
+               example = COALESCE(EXCLUDED.example, vocabulary.example)`,
+        [studyId, w.word, w.meaning, w.example || null]
       );
     }
   } catch (err) {
