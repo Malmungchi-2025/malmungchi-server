@@ -1,16 +1,15 @@
 // utils/mailer.js
-
 const nodemailer = require('nodemailer');
 
 const MAIL_ENABLED = String(process.env.MAIL_ENABLED || 'true').toLowerCase() === 'true';
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_SECURE = SMTP_PORT === 465 || process.env.SMTP_SECURE === 'true'; // 465면 true
+const SMTP_SECURE = SMTP_PORT === 465 || process.env.SMTP_SECURE === 'true';
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const MAIL_FROM = process.env.MAIL_FROM || process.env.SMTP_USER;
 
-// --- 여기서 환경 로그 찍기 ---
+// 🔻 여기서 찍기 (상수 선언 ‘다음’)
 (function logMailEnvOnce() {
   const mask = (s='') => (s ? `${s.length} chars` : 'none');
   console.log('[MAIL][ENV]', {

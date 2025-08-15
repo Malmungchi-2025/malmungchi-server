@@ -1,6 +1,7 @@
 // routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
+const { sendMail } = require('../utils/mailer'); // ★ 추가
 
 // 컨트롤러
 const {
