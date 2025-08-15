@@ -1,4 +1,5 @@
 // utils/mailer.js
+
 const nodemailer = require('nodemailer');
 
 const MAIL_ENABLED = String(process.env.MAIL_ENABLED || 'true').toLowerCase() === 'true';
@@ -8,6 +9,21 @@ const SMTP_SECURE = SMTP_PORT === 465 || process.env.SMTP_SECURE === 'true'; // 
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const MAIL_FROM = process.env.MAIL_FROM || process.env.SMTP_USER;
+
+// --- 여기서 환경 로그 찍기 ---
+(function logMailEnvOnce() {
+  const mask = (s='') => (s ? `${s.length} chars` : 'none');
+  console.log('[MAIL][ENV]', {
+    enabled: MAIL_ENABLED,
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    user: SMTP_USER,
+    pass_len: mask(SMTP_PASS),
+    from: MAIL_FROM,
+  });
+})();
+
 
 function normalizeFrom(from, user) {
   // "말뭉치 <abc@gmail.com>" 같은 형태에서 실제 주소만 추출
@@ -57,6 +73,7 @@ async function verifySmtp() {
     });
     return false;
   }
+  
 }
 
 /** 실제 메일 전송 (컨트롤러에서는 true/false만 사용) */

@@ -1,3 +1,4 @@
+//server.js
 const dotenv = require('dotenv');
 dotenv.config(); // ✅ 최상단에서 가장 먼저 실행
 const fs = require('fs');

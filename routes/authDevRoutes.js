@@ -1,6 +1,7 @@
 // routes/authDevRoutes.js
 const express = require('express');
 const router = express.Router();
+const { sendMail } = require('../utils/mailer'); // ★ 추가
 
 // 이메일별 최근 OTP 저장 (인메모리)
 const otpStore = new Map();
