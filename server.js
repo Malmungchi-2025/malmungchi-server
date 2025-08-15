@@ -25,6 +25,9 @@ app.use('/api/auth', authRoutes);
 const gptRoutes = require('./routes/gptRoutes');
 app.use('/api/gpt', gptRoutes);
 
+const { verifySmtp } = require('./utils/mailer');
+verifySmtp(); // 부팅 시 1회
+
 // ✅ DB 초기화 함수
 async function initializeDB() {
   try {
