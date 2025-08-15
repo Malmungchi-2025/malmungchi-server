@@ -117,10 +117,13 @@ exports.generateQuote = async (req, res) => {
       });
     }
 
-    // 2) GPT 호출 (기능 동일)
+    const topics = ['직장', '일상', '친구', '습관'];
+    const seed = Math.floor(Math.random()*100000);
     const prompt = `
-      20대 사회초년생을 위한 문해력 학습용 글을 작성해줘.
-      조건: 쉬운 단어, 480~520자, 직장/일상/친구/습관 주제.
+    오늘 날짜: ${today}, 난수: ${seed}
+    아래 4개 주제를 돌아가며 1개만 선택해 글을 작성해줘(최근 7일 동안 쓴 것과 중복 금지): ${topics.join(', ')}
+    조건: 쉬운 단어, 480~520자, 오늘만의 포인트 1개 포함.
+    출력은 본문 텍스트만(코드블록 금지).
     `;
     const gptRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
