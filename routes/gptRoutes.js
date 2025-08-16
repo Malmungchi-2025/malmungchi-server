@@ -16,6 +16,58 @@ const { auth, requireLogin } = require('../middlewares/auth');
 // 🔒 이하 모든 GPT/Study/Vocabulary/Quiz API는 로그인 필수
 router.use(auth, requireLogin);
 
+
+/**
+ * @swagger
+ * /api/gpt/study/by-date:
+ *   get:
+ *     summary: 특정 날짜의 학습(글감/필사/단어/퀴즈+채점) 통합 조회
+ *     tags: [GPT]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: date
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: '^\d{4}-\d{2}-\d{2}$'
+ *         example: "2025-08-16"
+ *     responses:
+ *       200:
+ *         description: 통합 조회 성공
+ *       404:
+ *         description: 해당 날짜 학습 없음
+ */
+router.get('/study/by-date', gptController.getStudyByDate);
+
+/**
+ * @swagger
+ * /api/gpt/study/available-dates:
+ *   get:
+ *     summary: 특정 월에 사용자가 학습한 날짜 목록
+ *     tags: [GPT]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: year
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "2025"
+ *       - name: month
+ *         in: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "08"
+ *     responses:
+ *       200:
+ *         description: ["2025-08-01","2025-08-03", ...] 형태로 반환
+ */
+router.get('/study/available-dates', gptController.getAvailableDates);
+
 /**
  * @swagger
  * tags:

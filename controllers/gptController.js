@@ -85,7 +85,7 @@ async function saveVocabulary(studyId, content) {
     // 🔒 중복 방지: (study_id, word) 유니크 권장
     for (const w of words) {
       await pool.query(
-        `INSERT INTO vocabulary (study_id, word,it meaning, example)
+        `INSERT INTO vocabulary (study_id, word, meaning, example)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (study_id, word) DO UPDATE
            SET meaning = EXCLUDED.meaning,
@@ -96,6 +96,23 @@ async function saveVocabulary(studyId, content) {
   } catch (err) {
     console.error('단어 저장 오류:', err.message);
   }
+}
+//saveVocabulary()에서 parseJsonLoose(raw)함수
+function parseJsonLoose(txt) {
+  try { return JSON.parse(txt); } catch {}
+  // ```json ... ``` 같은 코드블록 제거
+  const cleaned = txt
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  try { return JSON.parse(cleaned); } catch {}
+  // 배열 괄호 추출
+  const m = cleaned.match(/\[[\s\S]*\]/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  // 객체 괄호 추출
+  const m2 = cleaned.match(/\{[\s\S]*\}/);
+  if (m2) { try { return JSON.parse(m2[0]); } catch {} }
+  return [];
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -574,6 +591,124 @@ exports.saveQuizAnswer = async (req, res) => {
   } catch (err) {
     console.error('❌ 응답 저장 실패:', err.message);
     res.status(err.status || 500).json({ success: false, message: err.message || '응답 저장 실패' });
+  }
+};
+
+/**
+ * GET /api/gpt/study/by-date?date=YYYY-MM-DD
+ * - 해당 날짜 학습(글감/필사/단어/퀴즈+채점)을 한 번에 반환
+ */
+exports.getStudyByDate = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const date = req.query.date; // "2025-08-16"
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, message: 'date 형식(YYYY-MM-DD)이 필요합니다.' });
+    }
+
+    // today_study 가 date 컬럼을 갖고 있다면 그걸로 바로 조회:
+    const studyRow = await pool.query(
+      `SELECT study_id, user_id, date, content, handwriting
+         FROM today_study
+        WHERE user_id = $1 AND date = $2
+        LIMIT 1`,
+      [userId, date]
+    );
+
+    // 만약 today_study가 created_at만 있고 date가 없다면:
+    // const { startUtc, endUtc } = kstDayRange(date);
+    // const studyRow = await pool.query(
+    //   `SELECT study_id, user_id, created_at, content, handwriting
+    //      FROM today_study
+    //     WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+    //     ORDER BY created_at ASC
+    //     LIMIT 1`,
+    //   [userId, startUtc, endUtc]
+    // );
+
+    if (studyRow.rows.length === 0) {
+      return res.status(404).json({ success: false, message: '해당 날짜의 학습이 없습니다.' });
+    }
+
+    const { study_id, content, handwriting } = studyRow.rows[0];
+
+    // 단어
+    const vocabQ = await pool.query(
+      `SELECT word, meaning, example
+         FROM vocabulary
+        WHERE study_id = $1
+        ORDER BY word ASC`,
+      [study_id]
+    );
+
+    // 퀴즈 (+ 사용자의 응답/채점 결과까지)
+    const quizQ = await pool.query(
+      `SELECT question_index, type, question, options, answer, explanation,
+              user_choice, is_correct
+         FROM quiz_set
+        WHERE study_id = $1
+        ORDER BY question_index ASC`,
+      [study_id]
+    );
+
+    const quizzes = quizQ.rows.map(r => ({
+      questionIndex: r.question_index,
+      type: r.type,
+      question: r.question,
+      options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+      answer: r.answer,
+      explanation: r.explanation,
+      userChoice: r.user_choice ?? null,
+      isCorrect: typeof r.is_correct === 'boolean' ? r.is_correct : null,
+    }));
+
+    return res.json({
+      success: true,
+      result: {
+        studyId: study_id,
+        date,
+        content,
+        handwriting: handwriting || '',
+        vocabulary: vocabQ.rows,      // [{word, meaning, example}]
+        quizzes                       // [{... userChoice, isCorrect}]
+      }
+    });
+  } catch (err) {
+    console.error('❌ getStudyByDate 실패:', err);
+    res.status(500).json({ success: false, message: '통합 조회 실패' });
+  }
+};
+
+/**
+ * (옵션) 달력용: 사용자가 학습한 날짜 목록
+ * GET /api/gpt/study/available-dates?year=2025&month=08
+ */
+exports.getAvailableDates = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { year, month } = req.query; // ex) 2025, 08
+    if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month)) {
+      return res.status(400).json({ success: false, message: 'year=YYYY, month=MM 형식이 필요합니다.' });
+    }
+    const prefix = `${year}-${month}`; // "2025-08"
+
+    const r = await pool.query(
+      `SELECT date
+         FROM today_study
+        WHERE user_id = $1
+          AND to_char(date, 'YYYY-MM') = $2
+        ORDER BY date ASC`,
+      [userId, prefix]
+    );
+
+    res.json({ success: true, result: r.rows.map(x => x.date) });
+  } catch (err) {
+    console.error('❌ getAvailableDates 실패:', err);
+    res.status(500).json({ success: false, message: '목록 조회 실패' });
   }
 };
 
