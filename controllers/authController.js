@@ -188,6 +188,7 @@ exports.resendVerification = async (req, res) => {
 };
 
 // 4) 로그인
+// 4) 로그인 (level 포함 — 최소 변경)
 exports.login = async (req, res) => {
   try {
     let { email, password } = req.body || {};
@@ -197,7 +198,7 @@ exports.login = async (req, res) => {
     email = String(email).trim().toLowerCase();
 
     const r = await pool.query(
-      `SELECT id, email, password, is_verified, name, nickname
+      `SELECT id, email, password, is_verified, name, nickname, level
        FROM users WHERE email = $1 LIMIT 1`,
       [email]
     );
@@ -211,11 +212,20 @@ exports.login = async (req, res) => {
       return res.status(401).json({ success:false, message:'이메일 또는 비밀번호가 올바르지 않습니다.' });
     }
 
+    // JWT 페이로드는 기존과 동일 (레벨은 응답 바디에서만 제공)
     const token = sign({ id: user.id, email: user.email, nickname: user.nickname });
+
     res.json({
-      success:true,
+      success: true,
       token,
-      user: { id: user.id, email: user.email, name: user.name, nickname: user.nickname, is_verified: user.is_verified }
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        nickname: user.nickname,
+        is_verified: user.is_verified,
+        level: user.level   // ✅ 추가
+      }
     });
   } catch (e) {
     console.error('login error:', e);
@@ -230,7 +240,7 @@ exports.me = async (req, res) => {
 
   try {
     const r = await pool.query(
-      `SELECT id, email, name, nickname, is_verified, created_at
+      `SELECT id, email, name, nickname, is_verified, created_at, level
        FROM users WHERE id = $1 LIMIT 1`,
       [req.user.id]
     );

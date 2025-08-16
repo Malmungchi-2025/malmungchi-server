@@ -85,7 +85,7 @@ async function saveVocabulary(studyId, content) {
     // 🔒 중복 방지: (study_id, word) 유니크 권장
     for (const w of words) {
       await pool.query(
-        `INSERT INTO vocabulary (study_id, word, meaning, example)
+        `INSERT INTO vocabulary (study_id, word,it meaning, example)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (study_id, word) DO UPDATE
            SET meaning = EXCLUDED.meaning,
@@ -104,6 +104,7 @@ async function saveVocabulary(studyId, content) {
  * POST /api/gpt/generate-quote
  *  - ✅ user_id 필수
  *  - ✅ (user_id, date) UNIQUE에 맞춰 UPSERT
+ *  - ✅ level 사용: 기본은 DB값, req.body.level(1~4)이 오면 override
  */
 exports.generateQuote = async (req, res) => {
   try {
@@ -112,7 +113,18 @@ exports.generateQuote = async (req, res) => {
 
     const today = getKstToday();
 
-    // 1) 이미 있으면 그대로 반환
+    // 0) 유저 레벨 조회 (없으면 1)
+    const lvQ = await pool.query(
+      'SELECT level FROM public.users WHERE id = $1 LIMIT 1',
+      [userId]
+    );
+    let userLevel = lvQ.rows[0]?.level ?? 1;
+
+    // (옵션) 프론트에서 level을 전송하면 1~4에 한해 override
+    const bodyLv = Number(req.body?.level);
+    if ([1, 2, 3, 4].includes(bodyLv)) userLevel = bodyLv;
+
+    // 1) 이미 있으면 그대로 반환 (+ level 포함)
     const checkQuery = `
       SELECT study_id, content
         FROM today_study
@@ -126,18 +138,33 @@ exports.generateQuote = async (req, res) => {
       return res.json({
         success: true,
         result: existing.rows[0].content,
-        studyId: existing.rows[0].study_id
+        studyId: existing.rows[0].study_id,
+        level: userLevel
       });
     }
 
     const topics = ['직장', '일상', '친구', '습관'];
-    const seed = Math.floor(Math.random()*100000);
+    const seed = Math.floor(Math.random() * 100000);
+
+    const levelConfigs = {
+      1: { len: '300~350자', vocab: '아주 쉬운 일상 어휘', extra: '짧고 명확한 문장' },
+      2: { len: '380~420자', vocab: '쉬운~보통 어휘',      extra: '간단한 접속사/부사' },
+      3: { len: '450~500자', vocab: '보통 난이도 어휘',    extra: '복문과 다양한 표현' },
+      4: { len: '500~550자', vocab: '약간 높은 난이도 어휘', extra: '구체적 묘사와 미묘한 뉘앙스' },
+    };
+    const cfg = levelConfigs[userLevel] ?? levelConfigs[1];
+
     const prompt = `
-    오늘 날짜: ${today}, 난수: ${seed}
-    아래 4개 주제를 돌아가며 1개만 선택해 글을 작성해줘(최근 7일 동안 쓴 것과 중복 금지): ${topics.join(', ')}
-    조건: 쉬운 단어, 480~520자, 오늘만의 포인트 1개 포함.
-    출력은 본문 텍스트만(코드블록 금지).
-    `;
+오늘 날짜: ${today}, 난수: ${seed}
+주제 후보: ${topics.join(', ')} (최근 7일 내 쓴 주제와 중복 금지, 1개만 선택)
+[작성 규칙 — 사용자 레벨 ${userLevel}]
+- 분량: ${cfg.len}
+- 어휘: ${cfg.vocab}
+- 스타일: ${cfg.extra}
+- 오늘만의 포인트(사건/감정/관찰) 1개 포함
+- 출력은 본문 텍스트만 (코드블록/머리말 금지)
+`.trim();
+
     const gptRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -163,7 +190,7 @@ exports.generateQuote = async (req, res) => {
     // 4) 단어 자동 추출 저장 (기능 동일)
     await saveVocabulary(studyId, generatedText);
 
-    res.json({ success: true, result: generatedText, studyId });
+    res.json({ success: true, result: generatedText, studyId, level: userLevel });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'GPT API 오류' });
