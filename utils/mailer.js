@@ -3,38 +3,60 @@ const nodemailer = require('nodemailer');
 
 const MAIL_ENABLED = String(process.env.MAIL_ENABLED || 'true').toLowerCase() === 'true';
 
-// Gmail용 transporter
+// 안전한 secure 판정
+const isSecure = (port) => Number(port) === 465;
+
+// Gmail transporter
 const gmailTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST_GMAIL,
   port: Number(process.env.SMTP_PORT_GMAIL || 587),
-  secure: Number(process.env.SMTP_PORT_GMAIL) === 465,
+  secure: isSecure(process.env.SMTP_PORT_GMAIL || 587),
   auth: {
     user: process.env.SMTP_USER_GMAIL,
     pass: process.env.SMTP_PASS_GMAIL,
   },
+  requireTLS: !isSecure(process.env.SMTP_PORT_GMAIL || 587),
+  tls: { minVersion: 'TLSv1.2' },
 });
 
-// Naver용 transporter
+// Naver transporter
 const naverTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST_NAVER,
   port: Number(process.env.SMTP_PORT_NAVER || 587),
-  secure: Number(process.env.SMTP_PORT_NAVER) === 465,
+  secure: isSecure(process.env.SMTP_PORT_NAVER || 587),
   auth: {
     user: process.env.SMTP_USER_NAVER,
     pass: process.env.SMTP_PASS_NAVER,
   },
+  requireTLS: !isSecure(process.env.SMTP_PORT_NAVER || 587),
+  tls: { minVersion: 'TLSv1.2' },
 });
 
+// FROM 주소 정규화 (표시명 유지 + 주소는 provider와 일치)
+function pickFromAddress(provider) {
+  if (provider === 'naver') {
+    return (
+      process.env.MAIL_FROM_NAVER ||
+      '말뭉치 <' + (process.env.SMTP_USER_NAVER || '') + '>'
+    );
+  }
+  // gmail
+  return (
+    process.env.MAIL_FROM_GMAIL || // ✅ 요청하신 키 우선 사용
+    process.env.MAIL_FROM ||       // 과거 호환
+    '말뭉치 <' + (process.env.SMTP_USER_GMAIL || '') + '>'
+  );
+}
+
 /**
- * provider 선택 (이메일 주소로 자동 판별)
+ * 수신자 이메일을 보고 provider 선택
  */
 function selectTransport(email) {
-  if (!email) return { transporter: gmailTransporter, from: process.env.MAIL_FROM };
-
-  if (/@naver\.com$/i.test(email)) {
-    return { transporter: naverTransporter, from: process.env.MAIL_FROM_NAVER };
+  const addr = String(email || '').trim().toLowerCase();
+  if (/@naver\.com$/.test(addr)) {
+    return { transporter: naverTransporter, from: pickFromAddress('naver') };
   }
-  return { transporter: gmailTransporter, from: process.env.MAIL_FROM };
+  return { transporter: gmailTransporter, from: pickFromAddress('gmail') };
 }
 
 /**
@@ -43,28 +65,52 @@ function selectTransport(email) {
 async function sendMail({ to, subject, html, text }) {
   if (!MAIL_ENABLED) {
     console.warn('[MAIL] disabled by MAIL_ENABLED=false');
-    return true;
+    return true; // 메일 비활성화 시에도 API 플로우는 통과
   }
-
   const { transporter, from } = selectTransport(to);
 
   try {
-    const info = await transporter.sendMail({
-      from,
-      to,
-      subject,
-      html,
-      text,
+    const info = await transporter.sendMail({ from, to, subject, html, text });
+    console.log('[MAIL] sent', {
+      id: info?.messageId,
+      response: info?.response,
+      accepted: info?.accepted,
+      rejected: info?.rejected,
     });
-    console.log('[MAIL] sent', info);
     return true;
   } catch (e) {
-    console.error('[MAIL] send FAILED', e);
+    console.error('[MAIL] send FAILED', {
+      message: e?.message,
+      code: e?.code,
+      response: e?.response,
+      responseCode: e?.responseCode,
+      command: e?.command,
+    });
     return false;
   }
 }
 
-module.exports = { sendMail };
+/**
+ * 부팅 시 SMTP 연결 검증 (Gmail/Naver 모두)
+ */
+async function verifySmtp() {
+  if (!MAIL_ENABLED) {
+    console.warn('[MAIL] disabled by MAIL_ENABLED=false');
+    return;
+  }
+  const verifyOne = async (label, t) => {
+    try {
+      await t.verify();
+      console.log(`[MAIL] ${label} SMTP OK`);
+    } catch (e) {
+      console.error(`[MAIL] ${label} SMTP FAIL`, e?.message || e);
+    }
+  };
+  await verifyOne('Gmail', gmailTransporter);
+  await verifyOne('Naver', naverTransporter);
+}
+
+module.exports = { sendMail, verifySmtp };
 
 
 
