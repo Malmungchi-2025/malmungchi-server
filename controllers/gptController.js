@@ -873,7 +873,9 @@ exports.giveTodayStudyPoint = async (req, res) => {
     }
 
     const rewardedDate = check.rows[0].rewarded_date;
-    if (rewardedDate === today || (rewardedDate && rewardedDate.toISOString?.().slice(0,10) === today)) {
+    // 문자열 비교로 고정
+    const alreadyRewarded = rewardedDate && String(rewardedDate) === today;
+    if (alreadyRewarded) {
       await client.query('ROLLBACK');
       return res.status(400).json({ success: false, message: '이미 포인트가 지급되었습니다.' });
     }
