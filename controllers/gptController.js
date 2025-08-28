@@ -840,7 +840,9 @@ exports.getAvailableDates = async (req, res) => {
  *  - ✅ 하루 1번만 지급 (user_id + date 유니크)
  *  - ✅ 포인트 지급 후 현재 포인트/이력 반환
  */
+// 10. 오늘의 학습 완료 시 포인트 지급 (study_reward 테이블 없이 today_study로 1일 1회 관리)
 exports.giveTodayStudyPoint = async (req, res) => {
+  const client = await pool.connect();
   try {
     const userId = req.user?.id;
     if (!userId) {
@@ -850,27 +852,34 @@ exports.giveTodayStudyPoint = async (req, res) => {
     const today = getKstToday();
     const POINT = 15;
 
-    // 1) 오늘 이력 먼저 추가 시도 (중복이면 아무 일도 안 함)
-    const insertReward = await pool.query(
+    await client.query('BEGIN');
+
+    // 1) 오늘 학습 존재 및 보상 여부 확인 (잠금으로 동시성 방지)
+    const check = await client.query(
       `
-      INSERT INTO study_reward (user_id, date, point)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id, date) DO NOTHING
-      RETURNING reward_id
+      SELECT study_id, rewarded_date
+        FROM public.today_study
+       WHERE user_id = $1
+         AND date = $2
+       LIMIT 1
+       FOR UPDATE
       `,
-      [userId, today, POINT]
+      [userId, today]
     );
 
-    // 이미 지급된 경우
-    if (insertReward.rowCount === 0) {
-      return res.status(400).json({
-        success: false,
-        message: '이미 포인트가 지급되었습니다.',
-      });
+    if (check.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: '오늘의 학습이 없습니다.' });
     }
 
-    // 2) 포인트 누적 (+ RETURNING 으로 현재 포인트 받기)
-    const updateUser = await pool.query(
+    const rewardedDate = check.rows[0].rewarded_date;
+    if (rewardedDate === today || (rewardedDate && rewardedDate.toISOString?.().slice(0,10) === today)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: '이미 포인트가 지급되었습니다.' });
+    }
+
+    // 2) 포인트 적립
+    const updUser = await client.query(
       `
       UPDATE public.users
          SET point = COALESCE(point, 0) + $2,
@@ -881,17 +890,31 @@ exports.giveTodayStudyPoint = async (req, res) => {
       [userId, POINT]
     );
 
-    const totalPoint = updateUser.rows[0]?.point ?? 0;
+    // 3) 오늘 학습에 보상지급 날짜 마킹
+    await client.query(
+      `
+      UPDATE public.today_study
+         SET rewarded_date = $3
+       WHERE user_id = $1
+         AND date = $2
+      `,
+      [userId, today, today]
+    );
+
+    await client.query('COMMIT');
 
     return res.json({
       success: true,
       message: '포인트가 지급되었습니다.',
-      todayReward: POINT,
-      totalPoint,
+      todayReward: POINT,                 // ✅ 안드 명세 유지
+      totalPoint: updUser.rows[0]?.point ?? 0
     });
   } catch (err) {
-    console.error('❌ 포인트 지급 오류:', err.message);
+    await client.query('ROLLBACK');
+    console.error('❌ 포인트 지급 오류:', err);
     return res.status(500).json({ success: false, message: '포인트 지급 실패' });
+  } finally {
+    client.release();
   }
 };
 
