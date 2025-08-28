@@ -832,7 +832,67 @@ exports.getAvailableDates = async (req, res) => {
     res.status(500).json({ success: false, message: '목록 조회 실패' });
   }
 };
+// ──────────────────────────────────────────────────────────────
+/**
+ * 10. 오늘의 학습 완료 시 포인트 지급
+ * POST /api/gpt/study/complete-reward
+ *  - ✅ user_id 필수
+ *  - ✅ 하루 1번만 지급 (user_id + date 유니크)
+ *  - ✅ 포인트 지급 후 현재 포인트/이력 반환
+ */
+exports.giveTodayStudyPoint = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
 
+    const today = getKstToday();
+
+    // 이미 오늘 포인트 지급 여부 조회 (user_id, date 기준)
+    const existQ = await pool.query(
+      `SELECT reward_id FROM study_reward WHERE user_id = $1 AND date = $2 LIMIT 1`,
+      [userId, today]
+    );
+    if (existQ.rows.length > 0) {
+      return res.status(400).json({ success: false, message: '이미 포인트가 지급되었습니다.' });
+    }
+
+    // 포인트 지급 (예: 15점)
+    const POINT = 15;
+
+    // 포인트 적립 (user 테이블에 point 필드 있다고 가정)
+    await pool.query(
+      `UPDATE public.users
+         SET point = COALESCE(point, 0) + $1
+       WHERE id = $2`,
+      [POINT, userId]
+    );
+
+    // 지급 이력 테이블 기록 (user_id, date 유니크, UPSERT)
+    await pool.query(
+      `INSERT INTO study_reward (user_id, date, point)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, date)
+       DO NOTHING`,
+      [userId, today, POINT]
+    );
+
+    // 현재 포인트 조회
+    const userQ = await pool.query(
+      `SELECT point FROM public.users WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      message: '포인트가 지급되었습니다.',
+      todayReward: POINT,
+      totalPoint: userQ.rows?.point ?? 0
+    });
+  } catch (err) {
+    console.error('❌ 포인트 지급 오류:', err.message);
+    res.status(500).json({ success: false, message: '포인트 지급 실패' });
+  }
+};
 
 
 // const axios = require('axios');
