@@ -307,6 +307,23 @@ router.post('/study/handwriting', gptController.saveHandwriting);
  */
 router.get('/study/handwriting/:studyId', gptController.getHandwriting);
 
+
+/**  
+ * @swagger  
+ * /api/gpt/study/complete-reward:  
+ *   post:  
+ *     summary: 오늘의 학습 완료 시 포인트 지급 (하루 1회, +15)  
+ *     tags: [GPT]  
+ *     security:  
+ *       - bearerAuth: []  
+ *     responses:  
+ *       200:  
+ *         description: 지급 성공  
+ *       400:  
+ *         description: 이미 지급됨  
+ */  
+router.post('/study/complete-reward', gptController.giveTodayStudyPoint); 
+
 module.exports = router;
 // const express = require('express');
 // const router = express.Router();
