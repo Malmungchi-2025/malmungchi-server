@@ -843,57 +843,57 @@ exports.getAvailableDates = async (req, res) => {
 exports.giveTodayStudyPoint = async (req, res) => {
   try {
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
-
-    const today = getKstToday();
-
-    // 이미 오늘 포인트 지급 여부 조회 (user_id, date 기준)
-    const existQ = await pool.query(
-      `SELECT reward_id FROM study_reward WHERE user_id = $1 AND date = $2 LIMIT 1`,
-      [userId, today]
-    );
-    if (existQ.rows.length > 0) {
-      return res.status(400).json({ success: false, message: '이미 포인트가 지급되었습니다.' });
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '인증 필요' });
     }
 
-    // 포인트 지급 (예: 15점)
+    const today = getKstToday();
     const POINT = 15;
 
-    // 포인트 적립 (user 테이블에 point 필드 있다고 가정)
-    await pool.query(
-      `UPDATE public.users
-         SET point = COALESCE(point, 0) + $1
-       WHERE id = $2`,
-      [POINT, userId]
-    );
-
-    // 지급 이력 테이블 기록 (user_id, date 유니크, UPSERT)
-    await pool.query(
-      `INSERT INTO study_reward (user_id, date, point)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, date)
-       DO NOTHING`,
+    // 1) 오늘 이력 먼저 추가 시도 (중복이면 아무 일도 안 함)
+    const insertReward = await pool.query(
+      `
+      INSERT INTO study_reward (user_id, date, point)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id, date) DO NOTHING
+      RETURNING reward_id
+      `,
       [userId, today, POINT]
     );
 
-    // 현재 포인트 조회
-    const userQ = await pool.query(
-      `SELECT point FROM public.users WHERE id = $1 LIMIT 1`,
-      [userId]
+    // 이미 지급된 경우
+    if (insertReward.rowCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: '이미 포인트가 지급되었습니다.',
+      });
+    }
+
+    // 2) 포인트 누적 (+ RETURNING 으로 현재 포인트 받기)
+    const updateUser = await pool.query(
+      `
+      UPDATE public.users
+         SET point = COALESCE(point, 0) + $2,
+             updated_at = now()
+       WHERE id = $1
+       RETURNING point
+      `,
+      [userId, POINT]
     );
 
-    res.json({
+    const totalPoint = updateUser.rows[0]?.point ?? 0;
+
+    return res.json({
       success: true,
       message: '포인트가 지급되었습니다.',
       todayReward: POINT,
-      totalPoint: userQ.rows?.point ?? 0
+      totalPoint,
     });
   } catch (err) {
     console.error('❌ 포인트 지급 오류:', err.message);
-    res.status(500).json({ success: false, message: '포인트 지급 실패' });
+    return res.status(500).json({ success: false, message: '포인트 지급 실패' });
   }
 };
-
 
 // const axios = require('axios');
 // const pool = require('../config/db');  // ✅ 공용 pool 사용
