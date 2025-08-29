@@ -920,61 +920,215 @@ exports.giveTodayStudyPoint = async (req, res) => {
   }
 };
 
+// /**
+//  * 11. 레벨 테스트 생성
+//  * POST /api/gpt/level-test/generate
+//  *  - user_id 필요
+//  *  - 단계별 프롬프트 기반 15문항 생성
+//  */
+// exports.generateLevelTest = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+//     const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 첫 테스트)
+//     if (![0,1,2,3].includes(stage)) {
+//       return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+//     }
+
+//     // 단계별 프롬프트 (파일에 정의한 규칙 활용)
+//     const stagePrompts = {
+//       0: "20대 사회초년생의 어휘력과 문해력을 객관적으로 평가할 수 있는 15문항의 사지선다형 테스트를 만들어 줘...",
+//       1: "기초→활용 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+//       2: "활용→심화 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+//       3: "심화→고급 단계 전환 테스트 (15문항, 4지선다, 정답 1개)..."
+//     };
+
+//     const prompt = stagePrompts[stage];
+
+//     // GPT 호출
+//     const gptRes = await axios.post(
+//       "https://api.openai.com/v1/chat/completions",
+//       {
+//         model: "gpt-3.5-turbo",
+//         messages: [{ role: "user", content: prompt }],
+//         temperature: 0.7
+//       },
+//       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+//     );
+
+//     let raw = gptRes.data.choices[0].message.content;
+//     let questions = JSON.parse(raw); // [{"question":"...","options":["..."],"answer":"..."}]
+
+//     // DB 저장
+//     await pool.query("DELETE FROM quiz_level_test WHERE user_id = $1", [userId]); // 중복 방지
+//     for (let i = 0; i < questions.length; i++) {
+//       const q = questions[i];
+//       await pool.query(
+//         `INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+//          VALUES ($1,$2,$3,$4::jsonb,$5)`,
+//         [userId, i+1, q.question, JSON.stringify(q.options), q.answer]
+//       );
+//     }
+
+//     return res.json({ success: true, result: questions });
+//   } catch (err) {
+//     console.error("❌ 레벨 테스트 생성 오류:", err.message);
+//     res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+//   }
+// };
+
+// controllers/levelTestController.js (혹은 현재 파일 위치)
+// 필요한 모듈: axios, pool (pg), 그리고 아래 helper 포함
+
+const axios = require("axios");
+
+// ---------- Helpers ----------
+/** 코드블록 제거 + JSON 파싱(실패 시 null) */
+function safeJsonParse(text) {
+  try {
+    const stripped = String(text || "")
+      .replace(/```json\s*|```\s*|```/gi, "")
+      .trim();
+    return JSON.parse(stripped);
+  } catch {
+    return null;
+  }
+}
+
+/** 4지선다/스키마 검증 */
+function validateQuestions(arr) {
+  if (!Array.isArray(arr) || arr.length !== 15) return false;
+  for (const q of arr) {
+    if (
+      !q ||
+      typeof q.question !== "string" ||
+      !Array.isArray(q.options) ||
+      q.options.length !== 4 ||
+      !q.options.every((o) => typeof o === "string") ||
+      typeof q.answer !== "string" ||
+      !q.options.includes(q.answer)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** stage별 프롬프트 */
+function promptForStage(stage) {
+  const COMMON_RULE =
+    '출력은 "오직 JSON 배열" 하나만. 마크다운/설명/코드블록/문장 금지. ' +
+    '배열 길이는 정확히 15. 각 원소는 {"question": string, "options": string[4], "answer": string} 형식. ' +
+    '"answer"는 반드시 "options" 중 하나와 동일한 텍스트. ' +
+    "난이도는 지시에 맞추고, 보기는 오타/중복 없이 자연스러운 한국어로.";
+
+  const map = {
+    0: `20대 사회초년생의 어휘력/문해력을 객관적으로 평가하는 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+    1: `기초→활용 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+    2: `활용→심화 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+    3: `심화→고급 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+  };
+  return map[stage];
+}
+
+/** OpenAI 호출 (3.5 유지, 재시도 포함) */
+async function callOpenAIWithRetry(messages, { tries = 2, timeout = 25000 } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const resp = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-3.5-turbo", // ← 요청대로 3.5 유지
+          messages,
+          temperature: 0.3,       // 안정성 위해 낮춤
+          // (참고) 3.5는 response_format json_object 미지원 -> safeJsonParse로 보완
+          // max_tokens: 2000,
+        },
+        {
+          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+          timeout,
+        }
+      );
+      return resp;
+    } catch (err) {
+      lastErr = err;
+      // 첫 시도 실패 시 한 번 더 시도
+      console.error(`[OpenAI][try ${i + 1}]`, err?.response?.data || err.message);
+      if (i < tries - 1) continue;
+    }
+  }
+  throw lastErr;
+}
+
+// ---------- Controller ----------
 /**
  * 11. 레벨 테스트 생성
  * POST /api/gpt/level-test/generate
- *  - user_id 필요
- *  - 단계별 프롬프트 기반 15문항 생성
+ * body: { stage: 0|1|2|3 }
+ * 응답: { success: true, result: Question[] }
  */
 exports.generateLevelTest = async (req, res) => {
+  const client = await pool.connect();
   try {
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+    if (!userId) return res.status(401).json({ success: false, message: "인증 필요" });
 
-    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 첫 테스트)
-    if (![0,1,2,3].includes(stage)) {
-      return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후)
+    if (![0, 1, 2, 3].includes(stage)) {
+      return res.status(400).json({ success: false, message: "잘못된 단계 값" });
     }
 
-    // 단계별 프롬프트 (파일에 정의한 규칙 활용)
-    const stagePrompts = {
-      0: "20대 사회초년생의 어휘력과 문해력을 객관적으로 평가할 수 있는 15문항의 사지선다형 테스트를 만들어 줘...",
-      1: "기초→활용 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
-      2: "활용→심화 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
-      3: "심화→고급 단계 전환 테스트 (15문항, 4지선다, 정답 1개)..."
-    };
+    const prompt = promptForStage(stage);
+    const messages = [
+      { role: "system", content: "You are a test item generator. Reply with JSON array only." },
+      { role: "user", content: prompt },
+    ];
 
-    const prompt = stagePrompts[stage];
+    // OpenAI 호출 (재시도 포함)
+    const gptRes = await callOpenAIWithRetry(messages);
 
-    // GPT 호출
-    const gptRes = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
+    const raw = gptRes?.data?.choices?.[0]?.message?.content ?? "";
+    let questions = safeJsonParse(raw);
 
-    let raw = gptRes.data.choices[0].message.content;
-    let questions = JSON.parse(raw); // [{"question":"...","options":["..."],"answer":"..."}]
+    // 혹시 {"questions":[...]} 형태면 보정
+    if (questions && !Array.isArray(questions) && Array.isArray(questions.questions)) {
+      questions = questions.questions;
+    }
 
-    // DB 저장
-    await pool.query("DELETE FROM quiz_level_test WHERE user_id = $1", [userId]); // 중복 방지
+    if (!validateQuestions(questions)) {
+      console.error("Invalid LLM output (first 500):", String(raw).slice(0, 500));
+      return res.status(502).json({ success: false, message: "생성 결과 형식 오류" });
+    }
+
+    // DB 저장 (성공 파싱 이후 트랜잭션)
+    await client.query("BEGIN");
+    await client.query("DELETE FROM quiz_level_test WHERE user_id=$1", [userId]);
+
+    const insertSql = `
+      INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+      VALUES ($1, $2, $3, $4::jsonb, $5)
+    `;
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      await pool.query(
-        `INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
-         VALUES ($1,$2,$3,$4::jsonb,$5)`,
-        [userId, i+1, q.question, JSON.stringify(q.options), q.answer]
-      );
+      await client.query(insertSql, [
+        userId,
+        i + 1,
+        String(q.question || ""),
+        JSON.stringify(q.options || []),
+        String(q.answer || ""),
+      ]);
     }
+    await client.query("COMMIT");
 
     return res.json({ success: true, result: questions });
   } catch (err) {
-    console.error("❌ 레벨 테스트 생성 오류:", err.message);
-    res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+    await client.query("ROLLBACK");
+    console.error("❌ 레벨 테스트 생성 오류:", err?.response?.data || err.message);
+    return res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+  } finally {
+    client.release();
   }
 };
 
