@@ -920,6 +920,133 @@ exports.giveTodayStudyPoint = async (req, res) => {
   }
 };
 
+/**
+ * 11. 레벨 테스트 생성
+ * POST /api/gpt/level-test/generate
+ *  - user_id 필요
+ *  - 단계별 프롬프트 기반 15문항 생성
+ */
+exports.generateLevelTest = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 첫 테스트)
+    if (![0,1,2,3].includes(stage)) {
+      return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+    }
+
+    // 단계별 프롬프트 (파일에 정의한 규칙 활용)
+    const stagePrompts = {
+      0: "20대 사회초년생의 어휘력과 문해력을 객관적으로 평가할 수 있는 15문항의 사지선다형 테스트를 만들어 줘...",
+      1: "기초→활용 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+      2: "활용→심화 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+      3: "심화→고급 단계 전환 테스트 (15문항, 4지선다, 정답 1개)..."
+    };
+
+    const prompt = stagePrompts[stage];
+
+    // GPT 호출
+    const gptRes = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7
+      },
+      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+    );
+
+    let raw = gptRes.data.choices[0].message.content;
+    let questions = JSON.parse(raw); // [{"question":"...","options":["..."],"answer":"..."}]
+
+    // DB 저장
+    await pool.query("DELETE FROM quiz_level_test WHERE user_id = $1", [userId]); // 중복 방지
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      await pool.query(
+        `INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+         VALUES ($1,$2,$3,$4::jsonb,$5)`,
+        [userId, i+1, q.question, JSON.stringify(q.options), q.answer]
+      );
+    }
+
+    return res.json({ success: true, result: questions });
+  } catch (err) {
+    console.error("❌ 레벨 테스트 생성 오류:", err.message);
+    res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+  }
+};
+
+
+/**
+ * 12. 레벨 테스트 응답 및 채점
+ * POST /api/gpt/level-test/submit
+ */
+exports.submitLevelTest = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { answers } = req.body; // [{questionIndex:1, choice:"..."}]
+    if (!Array.isArray(answers)) {
+      return res.status(400).json({ success: false, message: "answers 배열 필요" });
+    }
+
+    await client.query("BEGIN");
+
+    // 정답 채점
+    let correctCount = 0;
+    for (const a of answers) {
+      const row = await client.query(
+        `SELECT answer FROM quiz_level_test 
+          WHERE user_id=$1 AND question_index=$2 LIMIT 1`,
+        [userId, a.questionIndex]
+      );
+      if (row.rows.length === 0) continue;
+      const isCorrect = row.rows[0].answer === a.choice;
+      if (isCorrect) correctCount++;
+
+      await client.query(
+        `UPDATE quiz_level_test 
+            SET user_choice=$1, is_correct=$2
+          WHERE user_id=$3 AND question_index=$4`,
+        [a.choice, isCorrect, userId, a.questionIndex]
+      );
+    }
+
+    // 단계 승급 규칙
+    let newLevel = null;
+    if (correctCount >= 13) newLevel = "고급";
+    else if (correctCount >= 9) newLevel = "심화";
+    else if (correctCount >= 5) newLevel = "활용";
+    else newLevel = "기초";
+
+    // users 테이블 업데이트 (+1 단계)
+    await client.query(
+      `UPDATE public.users SET level = level + 1, updated_at=now() WHERE id=$1`,
+      [userId]
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      success: true,
+      correctCount,
+      resultLevel: newLevel,
+      message: "레벨 테스트 채점 완료, 레벨이 갱신되었습니다."
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ 레벨 테스트 제출 오류:", err.message);
+    res.status(500).json({ success: false, message: "레벨 테스트 채점 실패" });
+  } finally {
+    client.release();
+  }
+};
+
+
 // const axios = require('axios');
 // const pool = require('../config/db');  // ✅ 공용 pool 사용
 

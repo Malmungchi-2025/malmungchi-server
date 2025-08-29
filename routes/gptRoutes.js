@@ -324,6 +324,88 @@ router.get('/study/handwriting/:studyId', gptController.getHandwriting);
  */  
 router.post('/study/complete-reward', gptController.giveTodayStudyPoint); 
 
+
+/**
+ * @swagger
+ * tags:
+ *   name: LevelTest
+ *   description: 레벨 테스트 API
+ */
+
+/**
+ * @swagger
+ * /api/gpt/level-test/generate:
+ *   post:
+ *     summary: 레벨 테스트 생성
+ *     tags: [LevelTest]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [stage]
+ *             properties:
+ *               stage:
+ *                 type: integer
+ *                 enum: [0, 1, 2, 3]
+ *                 description: |
+ *                   - 0: 회원가입 직후 종합 테스트  
+ *                   - 1: 기초→활용  
+ *                   - 2: 활용→심화  
+ *                   - 3: 심화→고급
+ *     responses:
+ *       200:
+ *         description: 생성 성공
+ *       400:
+ *         description: 잘못된 요청
+ *       401:
+ *         description: 인증 필요
+ *       500:
+ *         description: 서버 오류
+ */
+router.post('/level-test/generate', gptController.generateLevelTest);
+
+/**
+ * @swagger
+ * /api/gpt/level-test/submit:
+ *   post:
+ *     summary: 레벨 테스트 제출 및 채점
+ *     tags: [LevelTest]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [answers]
+ *             properties:
+ *               answers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [questionIndex, choice]
+ *                   properties:
+ *                     questionIndex:
+ *                       type: integer
+ *                     choice:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: 채점 성공
+ *       400:
+ *         description: 잘못된 요청
+ *       401:
+ *         description: 인증 필요
+ *       500:
+ *         description: 서버 오류
+ */
+router.post('/level-test/submit', gptController.submitLevelTest);
+
 module.exports = router;
 // const express = require('express');
 // const router = express.Router();
