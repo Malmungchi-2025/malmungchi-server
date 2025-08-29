@@ -1072,7 +1072,7 @@ ${COMMON_RULE}`,
 }
 
 /** OpenAI 호출 (3.5 유지, 재시도 1회, 서버 타임아웃 12s) */
-async function callOpenAIWithRetry(messages, { tries = 1, timeout = 12000 } = {}) {
+async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
