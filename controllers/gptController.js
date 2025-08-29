@@ -1086,7 +1086,7 @@ async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}
         },
         {
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-          timeout: 9000,           // ← 9초로 단일화
+          timeout: 49000,           // ← 9초로 단일화
         }
       );
       // const resp = await axios.post(
