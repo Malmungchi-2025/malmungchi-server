@@ -981,7 +981,7 @@ exports.giveTodayStudyPoint = async (req, res) => {
 // controllers/levelTestController.js (혹은 현재 파일 위치)
 // 필요한 모듈: axios, pool (pg), 그리고 아래 helper 포함
 
-const axios = require("axios");
+// const axios = require("axios");
 
 // ---------- Helpers ----------
 /** 코드블록 제거 + JSON 파싱(실패 시 null) */
