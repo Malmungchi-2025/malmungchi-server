@@ -1079,17 +1079,30 @@ async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}
       const resp = await axios.post(
         "https://api.openai.com/v1/chat/completions",
         {
-          //model: "gpt-3.5-turbo",
-          model: "gpt-4o-mini", //속도 느리면 model: "gpt-4o", 고민하기!
+          model: "gpt-4o-mini",
           messages,
-          temperature: 0.2, // 변동성 낮춤 (안정성)
-          // max_tokens 미지정: 한국어 문항이 잘리지 않도록 응답 길이 제한 완화
+          temperature: 0.2,
+          max_tokens: 2000,        // ← 상한
         },
         {
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-          timeout, // 서버는 클라이언트보다 짧게 (권장 12s)
+          timeout: 9000,           // ← 9초로 단일화
         }
       );
+      // const resp = await axios.post(
+      //   "https://api.openai.com/v1/chat/completions",
+      //   {
+      //     //model: "gpt-3.5-turbo",
+      //     model: "gpt-4o-mini", //속도 느리면 model: "gpt-4o", 고민하기!
+      //     messages,
+      //     temperature: 0.2, // 변동성 낮춤 (안정성)
+      //     // max_tokens 미지정: 한국어 문항이 잘리지 않도록 응답 길이 제한 완화
+      //   },
+      //   {
+      //     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      //     timeout, // 서버는 클라이언트보다 짧게 (권장 12s)
+      //   }
+      // );
       return resp;
     } catch (err) {
       lastErr = err;
