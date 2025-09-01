@@ -1113,52 +1113,75 @@ async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}
   throw lastErr;
 }
 
-// ---------- Controller ----------
+
 /**
  * 11. 레벨 테스트 생성
  * POST /api/gpt/level-test/generate
  * body: { stage: 0|1|2|3 }
  * 응답: { success: true, result: Question[] }
+ *
+ * 변경점:
+ * - GPT 호출 제거
+ * - DB 프리셋(quiz_level_test_template.payload) 로드
+ * - stage == 0 인 경우 시작 시 users.level = 0 으로 리셋(최초/재측정용)
  */
 exports.generateLevelTest = async (req, res) => {
   const client = await pool.connect();
   try {
     const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ success: false, message: "인증 필요" });
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "인증 필요" });
+    }
 
-    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후)
+    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 초기 레벨테스트)
     if (![0, 1, 2, 3].includes(stage)) {
       return res.status(400).json({ success: false, message: "잘못된 단계 값" });
     }
 
-    const prompt = promptForStage(stage);
-    const messages = [
-      { role: "system", content: "You are a test item generator. Reply with JSON array only." },
-      { role: "user", content: prompt },
-    ];
-
-    // OpenAI 호출 (재시도/타임아웃 단축)
-    const gptRes = await callOpenAIWithRetry(messages);
-
-    const raw = gptRes?.data?.choices?.[0]?.message?.content ?? "";
-    let questions = safeJsonParse(raw);
-
-    // 혹시 {"questions":[...]} 형태면 보정
-    if (questions && !Array.isArray(questions) && Array.isArray(questions.questions)) {
-      questions = questions.questions;
-    }
-
-    if (!validateQuestions(questions)) {
-      console.error("Invalid LLM output (first 500):", String(raw).slice(0, 500));
-      return res.status(502).json({ success: false, message: "생성 결과 형식 오류" });
-    }
-
-    // (선택) 위치 기반 소프트 체크 로그
-    softCheckPositions(questions);
-
-    // DB 저장 (성공 파싱 이후 트랜잭션)
     await client.query("BEGIN");
-    await client.query("DELETE FROM quiz_level_test WHERE user_id=$1", [userId]);
+
+    // ✅ 초기 레벨 테스트(로그인 후 처음)일 때만 레벨 0으로 리셋
+    if (stage === 0) {
+      await client.query(
+        `UPDATE public.users SET level = 0, updated_at = now() WHERE id = $1`,
+        [userId]
+      );
+    }
+
+    // ✅ 프리셋 로드
+    const { rows } = await client.query(
+      `SELECT payload FROM quiz_level_test_template WHERE stage = $1 LIMIT 1`,
+      [stage]
+    );
+    const questions = rows[0]?.payload;
+
+    // ✅ 기본 검증 (길이/형태)
+    if (
+      !Array.isArray(questions) ||
+      questions.length !== 15 ||
+      !questions.every(
+        (q) =>
+          q &&
+          typeof q.question === "string" &&
+          Array.isArray(q.options) &&
+          q.options.length === 4 &&
+          q.options.every((o) => typeof o === "string") &&
+          typeof q.answer === "string" &&
+          q.options.includes(q.answer)
+      )
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(500).json({
+        success: false,
+        message: `프리셋(stage=${stage})이 없거나 형식 오류(15문항/4지선다/answer 포함)`,
+      });
+    }
+
+    // (선택) 위치 기반 소프트 체크 로그를 그대로 쓰고 싶다면:
+    // softCheckPositions(questions);
+
+    // ✅ 사용자 기존 문제 삭제 후 저장
+    await client.query(`DELETE FROM quiz_level_test WHERE user_id = $1`, [userId]);
 
     const insertSql = `
       INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
@@ -1174,19 +1197,16 @@ exports.generateLevelTest = async (req, res) => {
         String(q.answer || ""),
       ]);
     }
-    await client.query("COMMIT");
 
+    await client.query("COMMIT");
     return res.json({ success: true, result: questions });
   } catch (err) {
     await client.query("ROLLBACK");
-    const msg =
-      err?.code === "ECONNABORTED"
-        ? "LLM 응답 지연(타임아웃)"
-        : (err?.response?.data?.error?.message || err.message);
-    console.error("❌ 레벨 테스트 생성 오류:", msg);
-    return res
-      .status(500)
-      .json({ success: false, message: "레벨 테스트 생성 실패(서버 타임아웃 또는 외부 API 지연)" });
+    console.error("❌ 레벨 테스트 생성 오류:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: "레벨 테스트 생성 실패(프리셋 로드 오류)",
+    });
   } finally {
     client.release();
   }
@@ -1195,6 +1215,7 @@ exports.generateLevelTest = async (req, res) => {
 /**
  * 12. 레벨 테스트 응답 및 채점
  * POST /api/gpt/level-test/submit
+ * (기존 로직 그대로 사용)
  */
 exports.submitLevelTest = async (req, res) => {
   const client = await pool.connect();
@@ -1214,17 +1235,19 @@ exports.submitLevelTest = async (req, res) => {
     for (const a of answers) {
       const row = await client.query(
         `SELECT answer FROM quiz_level_test
-           WHERE user_id=$1 AND question_index=$2 LIMIT 1`,
+           WHERE user_id=$1 AND question_index=$2
+           LIMIT 1`,
         [userId, a.questionIndex]
       );
       if (row.rows.length === 0) continue;
+
       const isCorrect = row.rows[0].answer === a.choice;
       if (isCorrect) correctCount++;
 
       await client.query(
         `UPDATE quiz_level_test
-             SET user_choice=$1, is_correct=$2
-           WHERE user_id=$3 AND question_index=$4`,
+            SET user_choice=$1, is_correct=$2
+          WHERE user_id=$3 AND question_index=$4`,
         [a.choice, isCorrect, userId, a.questionIndex]
       );
     }
@@ -1236,7 +1259,7 @@ exports.submitLevelTest = async (req, res) => {
     else if (correctCount >= 5) newLevel = "활용";
     else newLevel = "기초";
 
-    // users.level 직접 세팅 (하향 방지 원하면 GREATEST(level, $2) 사용)
+    // users.level 직접 세팅
     const levelMap = { "기초": 1, "활용": 2, "심화": 3, "고급": 4 };
     const targetLevel = levelMap[newLevel] ?? null;
     if (targetLevel !== null) {
@@ -1247,7 +1270,6 @@ exports.submitLevelTest = async (req, res) => {
     }
 
     await client.query("COMMIT");
-
     return res.json({
       success: true,
       correctCount,
