@@ -1113,6 +1113,26 @@ async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}
   throw lastErr;
 }
 
+// ====== 상단 공통 util로 추가 ======
+const cleanForDisplay = (s) =>
+  String(s ?? "")
+    // 1) 리터럴 \n 또는 /n -> 실제 개행
+    .replace(/\\n|\/n/g, "\n")
+    // 2) CRLF/CR 표준화
+    .replace(/\r\n|\r/g, "\n")
+    // 3) 개행을 공백 하나로 (줄바꿈 '지우기' 요구사항)
+    .replace(/\s*\n\s*/g, " ")
+    // 4) 연속 공백 압축
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const cleanQuestionObj = (q) => ({
+  ...q,
+  question: cleanForDisplay(q.question),
+  options: Array.isArray(q.options) ? q.options.map(cleanForDisplay) : [],
+  answer: cleanForDisplay(q.answer),
+});
+
 
 /**
  * 11. 레벨 테스트 생성
@@ -1199,7 +1219,11 @@ exports.generateLevelTest = async (req, res) => {
     }
 
     await client.query("COMMIT");
-    return res.json({ success: true, result: questions });
+     // ✅ 프론트로 나가는 응답만 깨끗하게 정리해서 전달
+     const resultForDisplay = questions.map(cleanQuestionObj);
+     return res.json({ success: true, result: resultForDisplay });
+ 
+    // return res.json({ success: true, result: questions });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ 레벨 테스트 생성 오류:", err.message);
