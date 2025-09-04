@@ -114,14 +114,14 @@ function parseJsonLoose(txt) {
   if (m2) { try { return JSON.parse(m2[0]); } catch {} }
   return [];
 }
-
 // ──────────────────────────────────────────────────────────────
 /**
  * 1. 오늘의 학습 글감 생성 API
  * POST /api/gpt/generate-quote
  *  - ✅ user_id 필수
- *  - ✅ (user_id, date) UNIQUE에 맞춰 UPSERT
- *  - ✅ level 사용: 기본은 DB값, req.body.level(1~4)이 오면 override
+ *  - ✅ (user_id, date) UNIQUE UPSERT
+ *  - ✅ level: DB 기본값, req.body.level(1~4) 오면 override
+ *  - ✅ refresh=1 쿼리로 강제 재생성
  */
 exports.generateQuote = async (req, res) => {
   try {
@@ -129,96 +129,234 @@ exports.generateQuote = async (req, res) => {
     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
 
     const today = getKstToday();
-
-    // (옵션) 강제 새로 생성 쿼리: /api/gpt/generate-quote?refresh=1
     const forceRefresh = req.query.refresh === '1';
 
-    // 유저 레벨
-    const lvQ = await pool.query('SELECT level FROM public.users WHERE id = $1 LIMIT 1',[userId]);
+    // 레벨 결정
+    const lvQ = await pool.query('SELECT level FROM public.users WHERE id = $1 LIMIT 1', [userId]);
     let userLevel = lvQ.rows[0]?.level ?? 1;
     const bodyLv = Number(req.body?.level);
-    if ([1,2,3,4].includes(bodyLv)) userLevel = bodyLv;
+    if ([1, 2, 3, 4].includes(bodyLv)) userLevel = bodyLv;
 
-    // 이미 있으면 재사용 (단, refresh=1이면 무시하고 새로 생성)
+    // 이미 있으면 재사용(단, refresh=1이면 새로 생성)
     if (!forceRefresh) {
       const existed = await pool.query(
-        'SELECT study_id, content FROM today_study WHERE date=$1 AND user_id=$2 LIMIT 1',
+        'SELECT study_id, content FROM today_study WHERE date = $1 AND user_id = $2 LIMIT 1',
         [today, userId]
       );
       if (existed.rows.length > 0) {
-        return res.json({ success:true, result: existed.rows[0].content, studyId: existed.rows[0].study_id, level:userLevel });
+        return res.json({
+          success: true,
+          result: existed.rows[0].content,
+          studyId: existed.rows[0].study_id,
+          level: userLevel
+        });
       }
     }
 
-    const levelConfigs = {
-      1:{len:'300~350자', vocab:'아주 쉬운 일상 어휘', extra:'짧고 명확한 문장'},
-      2:{len:'380~420자', vocab:'쉬운~보통 어휘', extra:'간단한 접속사/부사'},
-      3:{len:'450~500자', vocab:'보통 난이도 어휘', extra:'복문과 다양한 표현'},
-      4:{len:'500~550자', vocab:'약간 높은 난이도 어휘', extra:'구체적 묘사와 미묘한 뉘앙스'},
+    // PM 스펙(480~520자) 레벨 프롬프트
+    const levelPrompts = {
+      1: `20대 사회초년생을 위한 문해력 학습용 글을 작성하세요.
+주제는 문학적이거나 사무적인 내용 중 자유롭게 정해도 좋습니다.
+일상적이고 실무적인 소재(예: 직장, 친구, 일상 습관 등)를 사용하고, 쉬운 단어 위주로 작성하며 너무 길거나 복잡한 문장은 피해주세요.
+어휘: 아주 쉬운 일상 어휘 (예: 금일, 작성, 참조 등 기초 어휘 포함)
+분량: 480~520자
+스타일: 짧고 명확한 문장, 부드럽고 이해하기 쉬운 톤
+오늘만의 포인트(사건/감정/관찰) 1개 포함
+출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+      2: `20대 사회초년생을 위한 문해력 학습용 글을 작성하세요.
+주제는 문학적이거나 사무적인 내용 중 자유롭게 정하되, 실무나 뉴스, 사회생활과 관련된 문장이면 좋습니다.
+보고서, 공지문, 기사체 문장 톤을 일부 포함하고, 맥락 속에서 어휘를 해석할 수 있도록 자연스럽게 녹여주세요.
+어휘: 쉬운~보통 어휘 (예: 기준, 조치, 보고, 문서 등 활용 어휘 포함)
+분량: 480~520자
+스타일: 간단한 접속사/부사, 공식적이되 부담스럽지 않음
+오늘만의 포인트(사건/감정/관찰) 1개 포함
+출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+      3: `20대 사회초년생의 사고 확장과 표현력 향상을 위한 문해력 학습용 글을 작성하세요.
+주제는 문학적 또는 사무적인 내용 중 자유롭게 선택하되, 논리적 사고나 관점을 담을 수 있는 글이어야 합니다.
+어휘를 활용해 자신의 입장을 설명하거나 관점을 정리하는 문장 포함하고, 원인-결과, 비교, 예시 등 복합 문장을 사용해주세요.
+어휘: 보통 난이도 어휘 (예: 의견, 분석, 의의, 한계, 갈등 등 심화 어휘 포함)
+분량: 480~520자
+스타일: 복문과 다양한 표현, 조금 더 분석적이고 진지한 톤
+오늘만의 포인트(사건/감정/관찰) 1개 포함
+출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+      4: `20대 사회초년생의 성숙한 사고력과 비판적 분석을 돕는 문해력 학습용 글을 작성하세요.
+주제는 하나의 사회적/인문학적 주제에 대한 비판, 통찰, 문제 제기를 담아야 합니다.
+고급 어휘와 추상적 개념 일부(예: 합의, 구조, 담론, 성찰, 관계자 등)를 포함하고, 다소 압축적인 문장 구성과 문장 간 논리 흐름을 강조해주세요.
+독자가 스스로 사고를 이어가도록 유도하는 문장으로 마무리하세요.
+어휘: 약간 높은 난이도 어휘, 고급 수준 어휘 포함
+분량: 480~520자
+스타일: 구체적 묘사와 미묘한 뉘앙스, 비판적이되 학습자 친화적인 톤
+오늘만의 포인트(사건/감정/관찰) 1개 포함
+출력은 본문 텍스트만 (코드블록/머리말 금지)`
     };
-    const cfg = levelConfigs[userLevel] ?? levelConfigs[1];
 
+    const topics = ['직장', '일상', '친구', '습관'];
+    const seed = Math.floor(Math.random() * 100000);
+
+    // 프롬프트(대화/질문/따옴표 금지)
     const sys = {
       role: 'system',
       content: '너는 한국어 글쓰기 교사이자 작가다. 사용자에게 대화하지 말고, 요구한 본문만 정확히 작성한다.'
     };
-
     const user = {
       role: 'user',
       content: [
-        `오늘 날짜: ${today}`,
-        `주제 후보: 직장, 일상, 친구, 습관 중 1개를 **내부적으로 임의 선택** (최근 7일 중복 금지).`,
-        `[작성 규칙 — 레벨 ${userLevel}]`,
-        `- 분량: ${cfg.len}`,
-        `- 어휘: ${cfg.vocab}`,
-        `- 스타일: ${cfg.extra}`,
-        `- 오늘만의 포인트(사건/감정/관찰) 1개 포함`,
-        `- **출력은 한국어 서술형 본문 1개 단락만**`,
-        `- **질문/제안/대화체/머리말/따옴표/코드블록/메타설명 금지**`,
-        `- **"주제", "하시겠어요", "원하시면" 같은 표현 사용 금지**`
+        `오늘 날짜: ${today}, 난수: ${seed}`,
+        `주제 후보: ${topics.join(', ')} 중 1개를 내부적으로 임의 선택(최근 7일 중복 금지).`,
+        levelPrompts[userLevel] ?? levelPrompts[1],
+        `제약: 출력은 한국어 **서술형 본문 1개 단락만**.`,
+        `금지: 질문/제안/대화체/머리말/따옴표/코드블록/메타설명/제목.`,
+        `금지어 예: "주제", "하시겠어요", "원하시면" 등.`
       ].join('\n')
     };
 
-    // 최대 2회 재시도: 길이나 금칙어 검증
+    // 생성 + 검증(최대 3회 시도)
     let generatedText = '';
-    for (let attempt=0; attempt<2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const gptRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
         { model: 'gpt-3.5-turbo', messages: [sys, user], temperature: 0.7 },
         { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
       );
       generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
+      // 코드펜스 제거
+      generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
 
-      const bad = /주제|하시겠어요|원하시|원하면|어떠신가요|\?/.test(generatedText);
-      const tooShort = generatedText.replace(/\s/g,'').length < 250;
+      const badPhrase = /(주제|하시겠어요|원하시면|어떠신가요)/.test(generatedText);
+      const hasQuestion = /\?/.test(generatedText);
       const hasQuotes = /["“”'’]/.test(generatedText);
-      if (!bad && !tooShort && !hasQuotes) break;
-      if (attempt === 1) {
-        // 마지막 시도에도 불만족이면 강제로 정제
+      const tooShort = generatedText.replace(/\s/g, '').length < 350; // 안전 하한
+
+      if (!badPhrase && !hasQuestion && !hasQuotes && !tooShort) break;
+
+      // 마지막 시도면 강제 정제
+      if (attempt === 2) {
         generatedText = generatedText
-          .replace(/["“”'’]/g,'')
-          .replace(/(^|\n).*?(주제|하시겠|원하시|어떠신|요\?).*?\n?/g,'')
+          .replace(/["“”'’]/g, '')
+          .replace(/(^|\n).*?(주제|하시겠어요|원하시면|어떠신가요).*?\n?/g, '')
+          .replace(/\?/g, '')
           .trim();
       }
     }
 
+    // UPSERT 저장
     const upsert = await pool.query(
       `INSERT INTO today_study (user_id, content, date)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (user_id,date) DO UPDATE SET content=EXCLUDED.content
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, date) DO UPDATE SET content = EXCLUDED.content
        RETURNING study_id`,
       [userId, generatedText, today]
     );
-
     const studyId = upsert.rows[0].study_id;
+
+    // 단어 추출 저장
     await saveVocabulary(studyId, generatedText);
 
-    return res.json({ success:true, result: generatedText, studyId, level: userLevel });
+    return res.json({ success: true, result: generatedText, studyId, level: userLevel });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success:false, message:'GPT API 오류' });
+    res.status(500).json({ success: false, message: 'GPT API 오류' });
   }
 };
+
+// // ──────────────────────────────────────────────────────────────
+// /**
+//  * 1. 오늘의 학습 글감 생성 API
+//  * POST /api/gpt/generate-quote
+//  *  - ✅ user_id 필수
+//  *  - ✅ (user_id, date) UNIQUE에 맞춰 UPSERT
+//  *  - ✅ level 사용: 기본은 DB값, req.body.level(1~4)이 오면 override
+//  */
+// exports.generateQuote = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+//     const today = getKstToday();
+
+//     // 0) 유저 레벨 조회 (없으면 1)
+//     const lvQ = await pool.query(
+//       'SELECT level FROM public.users WHERE id = $1 LIMIT 1',
+//       [userId]
+//     );
+//     let userLevel = lvQ.rows[0]?.level ?? 1;
+
+//     // (옵션) 프론트에서 level을 전송하면 1~4에 한해 override
+//     const bodyLv = Number(req.body?.level);
+//     if ([1, 2, 3, 4].includes(bodyLv)) userLevel = bodyLv;
+
+//     // 1) 이미 있으면 그대로 반환 (+ level 포함)
+//     const checkQuery = `
+//       SELECT study_id, content
+//         FROM today_study
+//        WHERE date = $1
+//          AND user_id = $2
+//        LIMIT 1
+//     `;
+//     const existing = await pool.query(checkQuery, [today, userId]);
+
+//     if (existing.rows.length > 0) {
+//       return res.json({
+//         success: true,
+//         result: existing.rows[0].content,
+//         studyId: existing.rows[0].study_id,
+//         level: userLevel
+//       });
+//     }
+
+//     const topics = ['직장', '일상', '친구', '습관'];
+//     const seed = Math.floor(Math.random() * 100000);
+
+//     const levelConfigs = {
+//       1: { len: '300~350자', vocab: '아주 쉬운 일상 어휘', extra: '짧고 명확한 문장' },
+//       2: { len: '380~420자', vocab: '쉬운~보통 어휘',      extra: '간단한 접속사/부사' },
+//       3: { len: '450~500자', vocab: '보통 난이도 어휘',    extra: '복문과 다양한 표현' },
+//       4: { len: '500~550자', vocab: '약간 높은 난이도 어휘', extra: '구체적 묘사와 미묘한 뉘앙스' },
+//     };
+//     const cfg = levelConfigs[userLevel] ?? levelConfigs[1];
+
+//     const prompt = `
+// 오늘 날짜: ${today}, 난수: ${seed}
+// 주제 후보: ${topics.join(', ')} (최근 7일 내 쓴 주제와 중복 금지, 1개만 선택)
+// [작성 규칙 — 사용자 레벨 ${userLevel}]
+// - 분량: ${cfg.len}
+// - 어휘: ${cfg.vocab}
+// - 스타일: ${cfg.extra}
+// - 오늘만의 포인트(사건/감정/관찰) 1개 포함
+// - 출력은 본문 텍스트만 (코드블록/머리말 금지)
+// `.trim();
+
+//     const gptRes = await axios.post(
+//       'https://api.openai.com/v1/chat/completions',
+//       {
+//         model: 'gpt-3.5-turbo',
+//         messages: [{ role: 'user', content: prompt }],
+//       },
+//       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+//     );
+
+//     const generatedText = gptRes.data.choices[0].message.content;
+
+//     // 3) UPSERT 저장 (user_id, date 유니크)
+//     const insertQuery = `
+//       INSERT INTO today_study (user_id, content, date)
+//       VALUES ($1, $2, $3)
+//       ON CONFLICT (user_id, date)
+//       DO UPDATE SET content = EXCLUDED.content
+//       RETURNING study_id
+//     `;
+//     const inserted = await pool.query(insertQuery, [userId, generatedText, today]);
+//     const studyId = inserted.rows[0].study_id;
+
+//     // 4) 단어 자동 추출 저장 (기능 동일)
+//     await saveVocabulary(studyId, generatedText);
+
+//     res.json({ success: true, result: generatedText, studyId, level: userLevel });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: 'GPT API 오류' });
+//   }
+// };
 
 // ──────────────────────────────────────────────────────────────
 /**
@@ -717,7 +855,703 @@ exports.getAvailableDates = async (req, res) => {
     res.status(500).json({ success: false, message: '목록 조회 실패' });
   }
 };
+// ──────────────────────────────────────────────────────────────
+/**
+ * 10. 오늘의 학습 완료 시 포인트 지급
+ * POST /api/gpt/study/complete-reward
+ *  - ✅ user_id 필수
+ *  - ✅ 하루 1번만 지급 (user_id + date 유니크)
+ *  - ✅ 포인트 지급 후 현재 포인트/이력 반환
+ */
+// 10. 오늘의 학습 완료 시 포인트 지급 (study_reward 테이블 없이 today_study로 1일 1회 관리)
+exports.giveTodayStudyPoint = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '인증 필요' });
+    }
 
+    const today = getKstToday();
+    const POINT = 15;
+
+    await client.query('BEGIN');
+
+    // 1) 오늘 학습 존재 및 보상 여부 확인 (잠금으로 동시성 방지)
+    const check = await client.query(
+      `
+      SELECT study_id, rewarded_date
+        FROM public.today_study
+       WHERE user_id = $1
+         AND date = $2
+       LIMIT 1
+       FOR UPDATE
+      `,
+      [userId, today]
+    );
+
+    if (check.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: '오늘의 학습이 없습니다.' });
+    }
+
+    const rewardedDate = check.rows[0].rewarded_date;
+    // 문자열 비교로 고정
+    const alreadyRewarded = rewardedDate && String(rewardedDate) === today;
+    if (alreadyRewarded) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: '이미 포인트가 지급되었습니다.' });
+    }
+
+    // 2) 포인트 적립
+    const updUser = await client.query(
+      `
+      UPDATE public.users
+         SET point = COALESCE(point, 0) + $2,
+             updated_at = now()
+       WHERE id = $1
+       RETURNING point
+      `,
+      [userId, POINT]
+    );
+
+    // 3) 오늘 학습에 보상지급 날짜 마킹
+    await client.query(
+      `
+      UPDATE public.today_study
+         SET rewarded_date = $3
+       WHERE user_id = $1
+         AND date = $2
+      `,
+      [userId, today, today]
+    );
+
+    await client.query('COMMIT');
+
+    return res.json({
+      success: true,
+      message: '포인트가 지급되었습니다.',
+      todayReward: POINT,                 // ✅ 안드 명세 유지
+      totalPoint: updUser.rows[0]?.point ?? 0
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ 포인트 지급 오류:', err);
+    return res.status(500).json({ success: false, message: '포인트 지급 실패' });
+  } finally {
+    client.release();
+  }
+};
+
+// /**
+//  * 11. 레벨 테스트 생성
+//  * POST /api/gpt/level-test/generate
+//  *  - user_id 필요
+//  *  - 단계별 프롬프트 기반 15문항 생성
+//  */
+// exports.generateLevelTest = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+//     const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 첫 테스트)
+//     if (![0,1,2,3].includes(stage)) {
+//       return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+//     }
+
+//     // 단계별 프롬프트 (파일에 정의한 규칙 활용)
+//     const stagePrompts = {
+//       0: "20대 사회초년생의 어휘력과 문해력을 객관적으로 평가할 수 있는 15문항의 사지선다형 테스트를 만들어 줘...",
+//       1: "기초→활용 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+//       2: "활용→심화 단계 전환 테스트 (15문항, 4지선다, 정답 1개)...",
+//       3: "심화→고급 단계 전환 테스트 (15문항, 4지선다, 정답 1개)..."
+//     };
+
+//     const prompt = stagePrompts[stage];
+
+//     // GPT 호출
+//     const gptRes = await axios.post(
+//       "https://api.openai.com/v1/chat/completions",
+//       {
+//         model: "gpt-3.5-turbo",
+//         messages: [{ role: "user", content: prompt }],
+//         temperature: 0.7
+//       },
+//       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+//     );
+
+//     let raw = gptRes.data.choices[0].message.content;
+//     let questions = JSON.parse(raw); // [{"question":"...","options":["..."],"answer":"..."}]
+
+//     // DB 저장
+//     await pool.query("DELETE FROM quiz_level_test WHERE user_id = $1", [userId]); // 중복 방지
+//     for (let i = 0; i < questions.length; i++) {
+//       const q = questions[i];
+//       await pool.query(
+//         `INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+//          VALUES ($1,$2,$3,$4::jsonb,$5)`,
+//         [userId, i+1, q.question, JSON.stringify(q.options), q.answer]
+//       );
+//     }
+
+//     return res.json({ success: true, result: questions });
+//   } catch (err) {
+//     console.error("❌ 레벨 테스트 생성 오류:", err.message);
+//     res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+//   }
+// };
+
+// controllers/levelTestController.js (혹은 현재 파일 위치)
+// 필요한 모듈: axios, pool (pg), 그리고 아래 helper 포함
+
+// const axios = require("axios");
+
+// ---------- Helpers ----------
+/** 코드블록 제거 + JSON 파싱(실패 시 null) */
+function safeJsonParse(text) {
+  try {
+    const stripped = String(text || "")
+      .replace(/```json\s*|```\s*|```/gi, "")
+      .trim();
+    return JSON.parse(stripped);
+  } catch {
+    return null;
+  }
+}
+
+/** 4지선다/스키마 검증 */
+function validateQuestions(arr) {
+  if (!Array.isArray(arr) || arr.length !== 15) return false;
+  for (const q of arr) {
+    if (
+      !q ||
+      typeof q.question !== "string" ||
+      !Array.isArray(q.options) ||
+      q.options.length !== 4 ||
+      !q.options.every((o) => typeof o === "string") ||
+      typeof q.answer !== "string" ||
+      !q.options.includes(q.answer)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** (선택) 11~13은 3~5줄, 14~15는 7~10줄 소프트 체크 */
+function softCheckPositions(arr) {
+  try {
+    const countLines = (s) => String(s || "").split(/\r?\n/).filter(Boolean).length;
+    for (let i = 10; i <= 12; i++) {
+      const L = countLines(arr[i]?.question);
+      if (L < 3 || L > 6) console.warn(`[softCheck] Q${i + 1} expected 3~5 lines, got ${L}`);
+    }
+    for (let i = 13; i <= 14; i++) {
+      const L = countLines(arr[i]?.question);
+      if (L < 7 || L > 11) console.warn(`[softCheck] Q${i + 1} expected 7~10 lines, got ${L}`);
+    }
+  } catch {}
+}
+
+/** stage별 프롬프트 — 난이도/유형/문항 위치 고정 반영 */
+function promptForStage(stage) {
+  const COMMON_RULE =
+    '출력은 "오직 JSON 배열" 하나만. 마크다운/설명/코드블록/여는말 금지. ' +
+    '배열 길이=15. 각 원소는 {"question":string,"options":string[4],"answer":string} 형식. ' +
+    '"answer"는 반드시 options 중 하나와 동일. ' +
+    '모든 문항의 question에는 정답 판단 근거가 드러나도록 **지문/짧은 맥락 또는 발문**을 포함(별도 필드 금지). ' +
+    '보기는 자연스러운 한국어로, 중복·모호함·오탈자 금지.';
+
+  const map = {
+    // 0단계: (회원가입 직후) 기초→활용
+    0: `20대 사회초년생의 초기 진단을 위해, 실생활·사회생활 맥락에서 어휘·문해력을 객관적으로 평가하는 15문항을 생성하라.
+난이도 분포: 기초 40%, 활용 30%, 심화 20%, 고급 10% (자연스럽게 섞을 것).
+유형 풀: (5.1 어휘 추론, 5.2 문맥 이해, 5.3 중심 내용/주제, 5.4 작가 의도·함의·비유, 5.5 비판적 사고(주장-근거/논리오류), 5.6 짧은 글(3~5줄) 맥락 이해, 5.7 긴 글(7~10줄) 맥락 이해).
+**위치 고정**: 11~13번=5.6(각각 3~5줄 지문+질문), 14~15번=5.7(각각 7~10줄 지문+질문).
+각 문항은 실무/생활/사회 이슈 등 현실 맥락을 활용하고, 정답의 근거가 질문/지문에 분명히 드러나도록 하라.
+${COMMON_RULE}`,
+
+    // 1단계: 활용→심화
+    1: `20대 사회초년생이 활용 단계로 도약할 수 있는지 평가하는 15문항을 생성하라.
+목표: 일상·실무·사회 맥락 속 단어·문장을 정확히 해석하고, 문장 관계(원인-결과/대조/조건 등)와 논지를 파악하는 능력 평가.
+유형 풀: (2.1 어휘 의미/유추, 2.2 문맥 이해, 2.3 중심 내용/주제(추상 포함), 2.4 작가 의도·비유/풍자·함의, 2.5 비판적 사고(주장-근거/반박/논리오류), 2.6 짧은 글(3~5줄), 2.7 긴 글(7~10줄)).
+**위치 고정**: 14~15번=2.7(각 7~10줄 지문+질문). 나머지는 2.1~2.6을 고르게 섞어라.
+난이도는 활용을 중심으로 일부 심화/기초가 섞이도록 자연스럽게 분포시켜라.
+${COMMON_RULE}`,
+
+    // 2단계: 심화→고급
+    2: `20대 사회초년생이 심화 단계에서 고급 단계로 갈 수 있는지 평가하는 15문항을 생성하라.
+목표: 추상 개념, 은유/풍자, 미묘한 함의, 논증 구조(주장-근거-반박), 논리 오류 분석 등 고난도 문해력 평가.
+유형은 위와 동등 범주를 섞되, **마지막 2문항은 긴 글(7~10줄) 기반**으로 고정하고 고급 난이도 사고를 요구하게 하라.
+전 문항에서 정답이 되는 논리/근거가 텍스트에 충분히 드러나야 한다.
+${COMMON_RULE}`,
+
+    // 3단계: (옵션) 고급 유지/평가
+    3: `심화된 고급 학습자를 대상으로, 비판적 사고/추상 개념/담론 분석을 요구하는 15문항을 생성하라.
+마지막 2문항은 긴 글(7~10줄) 기반으로 고정한다.
+${COMMON_RULE}`,
+  };
+  return map[stage];
+}
+
+/** OpenAI 호출 (3.5 유지, 재시도 1회, 서버 타임아웃 12s) */
+async function callOpenAIWithRetry(messages, { tries = 1, timeout = 42000 } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const resp = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          messages,
+          temperature: 0.2,
+          max_tokens: 2000,        // ← 상한
+        },
+        {
+          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+          timeout: 49000,           // ← 9초로 단일화
+        }
+      );
+      // const resp = await axios.post(
+      //   "https://api.openai.com/v1/chat/completions",
+      //   {
+      //     //model: "gpt-3.5-turbo",
+      //     model: "gpt-4o-mini", //속도 느리면 model: "gpt-4o", 고민하기!
+      //     messages,
+      //     temperature: 0.2, // 변동성 낮춤 (안정성)
+      //     // max_tokens 미지정: 한국어 문항이 잘리지 않도록 응답 길이 제한 완화
+      //   },
+      //   {
+      //     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      //     timeout, // 서버는 클라이언트보다 짧게 (권장 12s)
+      //   }
+      // );
+      return resp;
+    } catch (err) {
+      lastErr = err;
+      console.error(`[OpenAI][try ${i + 1}]`, err?.response?.data || err.message);
+      if (i < tries - 1) continue;
+    }
+  }
+  throw lastErr;
+}
+
+// ====== 상단 공통 util로 추가 ======
+const cleanForDisplay = (s) =>
+  String(s ?? "")
+    // 1) 리터럴 \n 또는 /n -> 실제 개행
+    .replace(/\\n|\/n/g, "\n")
+    // 2) CRLF/CR 표준화
+    .replace(/\r\n|\r/g, "\n")
+    // 3) 개행을 공백 하나로 (줄바꿈 '지우기' 요구사항)
+    .replace(/\s*\n\s*/g, " ")
+    // 4) 연속 공백 압축
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+const cleanQuestionObj = (q) => ({
+  ...q,
+  question: cleanForDisplay(q.question),
+  options: Array.isArray(q.options) ? q.options.map(cleanForDisplay) : [],
+  answer: cleanForDisplay(q.answer),
+});
+
+
+/**
+ * 11. 레벨 테스트 생성
+ * POST /api/gpt/level-test/generate
+ * body: { stage: 0|1|2|3 }
+ * 응답: { success: true, result: Question[] }
+ *
+ * 변경점:
+ * - GPT 호출 제거
+ * - DB 프리셋(quiz_level_test_template.payload) 로드
+ * - stage == 0 인 경우 시작 시 users.level = 0 으로 리셋(최초/재측정용)
+ */
+exports.generateLevelTest = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "인증 필요" });
+    }
+
+    const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후 초기 레벨테스트)
+    if (![0, 1, 2, 3].includes(stage)) {
+      return res.status(400).json({ success: false, message: "잘못된 단계 값" });
+    }
+
+    await client.query("BEGIN");
+
+    // ✅ 초기 레벨 테스트(로그인 후 처음)일 때만 레벨 0으로 리셋
+    if (stage === 0) {
+      await client.query(
+        `UPDATE public.users SET level = 0, updated_at = now() WHERE id = $1`,
+        [userId]
+      );
+    }
+
+    // ✅ 프리셋 로드
+    const { rows } = await client.query(
+      `SELECT payload FROM quiz_level_test_template WHERE stage = $1 LIMIT 1`,
+      [stage]
+    );
+    const questions = rows[0]?.payload;
+
+    // ✅ 기본 검증 (길이/형태)
+    if (
+      !Array.isArray(questions) ||
+      questions.length !== 15 ||
+      !questions.every(
+        (q) =>
+          q &&
+          typeof q.question === "string" &&
+          Array.isArray(q.options) &&
+          q.options.length === 4 &&
+          q.options.every((o) => typeof o === "string") &&
+          typeof q.answer === "string" &&
+          q.options.includes(q.answer)
+      )
+    ) {
+      await client.query("ROLLBACK");
+      return res.status(500).json({
+        success: false,
+        message: `프리셋(stage=${stage})이 없거나 형식 오류(15문항/4지선다/answer 포함)`,
+      });
+    }
+
+    // (선택) 위치 기반 소프트 체크 로그를 그대로 쓰고 싶다면:
+    // softCheckPositions(questions);
+
+    // ✅ 사용자 기존 문제 삭제 후 저장
+    await client.query(`DELETE FROM quiz_level_test WHERE user_id = $1`, [userId]);
+
+    const insertSql = `
+      INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+      VALUES ($1, $2, $3, $4::jsonb, $5)
+    `;
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      await client.query(insertSql, [
+        userId,
+        i + 1,
+        String(q.question || ""),
+        JSON.stringify(q.options || []),
+        String(q.answer || ""),
+      ]);
+    }
+
+    await client.query("COMMIT");
+     // ✅ 프론트로 나가는 응답만 깨끗하게 정리해서 전달
+     const resultForDisplay = questions.map(cleanQuestionObj);
+     return res.json({ success: true, result: resultForDisplay });
+ 
+    // return res.json({ success: true, result: questions });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ 레벨 테스트 생성 오류:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: "레벨 테스트 생성 실패(프리셋 로드 오류)",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * 12. 레벨 테스트 응답 및 채점
+ * POST /api/gpt/level-test/submit
+ * (기존 로직 그대로 사용)
+ */
+exports.submitLevelTest = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: "인증 필요" });
+
+    const { answers } = req.body; // [{questionIndex:1, choice:"..."}]
+    if (!Array.isArray(answers)) {
+      return res.status(400).json({ success: false, message: "answers 배열 필요" });
+    }
+
+    await client.query("BEGIN");
+
+    // 정답 채점
+    let correctCount = 0;
+    for (const a of answers) {
+      const row = await client.query(
+        `SELECT answer FROM quiz_level_test
+           WHERE user_id=$1 AND question_index=$2
+           LIMIT 1`,
+        [userId, a.questionIndex]
+      );
+      if (row.rows.length === 0) continue;
+
+      const isCorrect = row.rows[0].answer === a.choice;
+      if (isCorrect) correctCount++;
+
+      await client.query(
+        `UPDATE quiz_level_test
+            SET user_choice=$1, is_correct=$2
+          WHERE user_id=$3 AND question_index=$4`,
+        [a.choice, isCorrect, userId, a.questionIndex]
+      );
+    }
+
+    // 단계 승급 규칙(정답수 → 레벨 매핑)
+    let newLevel = null;
+    if (correctCount >= 13) newLevel = "고급";
+    else if (correctCount >= 9) newLevel = "심화";
+    else if (correctCount >= 5) newLevel = "활용";
+    else newLevel = "기초";
+
+    // users.level 직접 세팅
+    const levelMap = { "기초": 1, "활용": 2, "심화": 3, "고급": 4 };
+    const targetLevel = levelMap[newLevel] ?? null;
+    if (targetLevel !== null) {
+      await client.query(
+        `UPDATE public.users SET level = $2, updated_at=now() WHERE id=$1`,
+        [userId, targetLevel]
+      );
+    }
+
+    await client.query("COMMIT");
+    return res.json({
+      success: true,
+      correctCount,
+      resultLevel: newLevel,
+      message: "레벨 테스트 채점 완료, 레벨이 갱신되었습니다.",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ 레벨 테스트 제출 오류:", err.message);
+    res.status(500).json({ success: false, message: "레벨 테스트 채점 실패" });
+  } finally {
+    client.release();
+  }
+};
+
+
+
+
+
+// // ---------- Helpers ----------
+// /** 코드블록 제거 + JSON 파싱(실패 시 null) */
+// function safeJsonParse(text) {
+//   try {
+//     const stripped = String(text || "")
+//       .replace(/```json\s*|```\s*|```/gi, "")
+//       .trim();
+//     return JSON.parse(stripped);
+//   } catch {
+//     return null;
+//   }
+// }
+
+// /** 4지선다/스키마 검증 */
+// function validateQuestions(arr) {
+//   if (!Array.isArray(arr) || arr.length !== 15) return false;
+//   for (const q of arr) {
+//     if (
+//       !q ||
+//       typeof q.question !== "string" ||
+//       !Array.isArray(q.options) ||
+//       q.options.length !== 4 ||
+//       !q.options.every((o) => typeof o === "string") ||
+//       typeof q.answer !== "string" ||
+//       !q.options.includes(q.answer)
+//     ) {
+//       return false;
+//     }
+//   }
+//   return true;
+// }
+
+// /** stage별 프롬프트 */
+// function promptForStage(stage) {
+//   const COMMON_RULE =
+//     '출력은 "오직 JSON 배열" 하나만. 마크다운/설명/코드블록/문장 금지. ' +
+//     '배열 길이는 정확히 15. 각 원소는 {"question": string, "options": string[4], "answer": string} 형식. ' +
+//     '"answer"는 반드시 "options" 중 하나와 동일한 텍스트. ' +
+//     "난이도는 지시에 맞추고, 보기는 오타/중복 없이 자연스러운 한국어로.";
+
+//   const map = {
+//     0: `20대 사회초년생의 어휘력/문해력을 객관적으로 평가하는 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+//     1: `기초→활용 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+//     2: `활용→심화 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+//     3: `심화→고급 전환 테스트. 4지선다형 15문항을 만들어라. ${COMMON_RULE}`,
+//   };
+//   return map[stage];
+// }
+
+// /** OpenAI 호출 (3.5 유지, 재시도 포함) */
+// async function callOpenAIWithRetry(messages, { tries = 2, timeout = 25000 } = {}) {
+//   let lastErr;
+//   for (let i = 0; i < tries; i++) {
+//     try {
+//       const resp = await axios.post(
+//         "https://api.openai.com/v1/chat/completions",
+//         {
+//           model: "gpt-3.5-turbo", // ← 요청대로 3.5 유지
+//           messages,
+//           temperature: 0.3,       // 안정성 위해 낮춤
+//           // (참고) 3.5는 response_format json_object 미지원 -> safeJsonParse로 보완
+//           // max_tokens: 2000,
+//         },
+//         {
+//           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+//           timeout,
+//         }
+//       );
+//       return resp;
+//     } catch (err) {
+//       lastErr = err;
+//       // 첫 시도 실패 시 한 번 더 시도
+//       console.error(`[OpenAI][try ${i + 1}]`, err?.response?.data || err.message);
+//       if (i < tries - 1) continue;
+//     }
+//   }
+//   throw lastErr;
+// }
+
+// // ---------- Controller ----------
+// /**
+//  * 11. 레벨 테스트 생성
+//  * POST /api/gpt/level-test/generate
+//  * body: { stage: 0|1|2|3 }
+//  * 응답: { success: true, result: Question[] }
+//  */
+// exports.generateLevelTest = async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: "인증 필요" });
+
+//     const { stage } = req.body; // 0,1,2,3 (0=회원가입 직후)
+//     if (![0, 1, 2, 3].includes(stage)) {
+//       return res.status(400).json({ success: false, message: "잘못된 단계 값" });
+//     }
+
+//     const prompt = promptForStage(stage);
+//     const messages = [
+//       { role: "system", content: "You are a test item generator. Reply with JSON array only." },
+//       { role: "user", content: prompt },
+//     ];
+
+//     // OpenAI 호출 (재시도 포함)
+//     const gptRes = await callOpenAIWithRetry(messages);
+
+//     const raw = gptRes?.data?.choices?.[0]?.message?.content ?? "";
+//     let questions = safeJsonParse(raw);
+
+//     // 혹시 {"questions":[...]} 형태면 보정
+//     if (questions && !Array.isArray(questions) && Array.isArray(questions.questions)) {
+//       questions = questions.questions;
+//     }
+
+//     if (!validateQuestions(questions)) {
+//       console.error("Invalid LLM output (first 500):", String(raw).slice(0, 500));
+//       return res.status(502).json({ success: false, message: "생성 결과 형식 오류" });
+//     }
+
+//     // DB 저장 (성공 파싱 이후 트랜잭션)
+//     await client.query("BEGIN");
+//     await client.query("DELETE FROM quiz_level_test WHERE user_id=$1", [userId]);
+
+//     const insertSql = `
+//       INSERT INTO quiz_level_test (user_id, question_index, question, options, answer)
+//       VALUES ($1, $2, $3, $4::jsonb, $5)
+//     `;
+//     for (let i = 0; i < questions.length; i++) {
+//       const q = questions[i];
+//       await client.query(insertSql, [
+//         userId,
+//         i + 1,
+//         String(q.question || ""),
+//         JSON.stringify(q.options || []),
+//         String(q.answer || ""),
+//       ]);
+//     }
+//     await client.query("COMMIT");
+
+//     return res.json({ success: true, result: questions });
+//   } catch (err) {
+//     await client.query("ROLLBACK");
+//     console.error("❌ 레벨 테스트 생성 오류:", err?.response?.data || err.message);
+//     return res.status(500).json({ success: false, message: "레벨 테스트 생성 실패" });
+//   } finally {
+//     client.release();
+//   }
+// };
+
+
+// /**
+//  * 12. 레벨 테스트 응답 및 채점
+//  * POST /api/gpt/level-test/submit
+//  */
+// exports.submitLevelTest = async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+//     const { answers } = req.body; // [{questionIndex:1, choice:"..."}]
+//     if (!Array.isArray(answers)) {
+//       return res.status(400).json({ success: false, message: "answers 배열 필요" });
+//     }
+
+//     await client.query("BEGIN");
+
+//     // 정답 채점
+//     let correctCount = 0;
+//     for (const a of answers) {
+//       const row = await client.query(
+//         `SELECT answer FROM quiz_level_test 
+//           WHERE user_id=$1 AND question_index=$2 LIMIT 1`,
+//         [userId, a.questionIndex]
+//       );
+//       if (row.rows.length === 0) continue;
+//       const isCorrect = row.rows[0].answer === a.choice;
+//       if (isCorrect) correctCount++;
+
+//       await client.query(
+//         `UPDATE quiz_level_test 
+//             SET user_choice=$1, is_correct=$2
+//           WHERE user_id=$3 AND question_index=$4`,
+//         [a.choice, isCorrect, userId, a.questionIndex]
+//       );
+//     }
+
+//     // 단계 승급 규칙
+//     let newLevel = null;
+//     if (correctCount >= 13) newLevel = "고급";
+//     else if (correctCount >= 9) newLevel = "심화";
+//     else if (correctCount >= 5) newLevel = "활용";
+//     else newLevel = "기초";
+
+//     // users 테이블 업데이트 (+1 단계)
+//     await client.query(
+//       `UPDATE public.users SET level = level + 1, updated_at=now() WHERE id=$1`,
+//       [userId]
+//     );
+
+//     await client.query("COMMIT");
+
+//     return res.json({
+//       success: true,
+//       correctCount,
+//       resultLevel: newLevel,
+//       message: "레벨 테스트 채점 완료, 레벨이 갱신되었습니다."
+//     });
+//   } catch (err) {
+//     await client.query("ROLLBACK");
+//     console.error("❌ 레벨 테스트 제출 오류:", err.message);
+//     res.status(500).json({ success: false, message: "레벨 테스트 채점 실패" });
+//   } finally {
+//     client.release();
+//   }
+// };
 
 
 // const axios = require('axios');
