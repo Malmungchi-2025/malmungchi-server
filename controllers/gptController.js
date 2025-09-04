@@ -130,87 +130,93 @@ exports.generateQuote = async (req, res) => {
 
     const today = getKstToday();
 
-    // 0) 유저 레벨 조회 (없으면 1)
-    const lvQ = await pool.query(
-      'SELECT level FROM public.users WHERE id = $1 LIMIT 1',
-      [userId]
-    );
+    // (옵션) 강제 새로 생성 쿼리: /api/gpt/generate-quote?refresh=1
+    const forceRefresh = req.query.refresh === '1';
+
+    // 유저 레벨
+    const lvQ = await pool.query('SELECT level FROM public.users WHERE id = $1 LIMIT 1',[userId]);
     let userLevel = lvQ.rows[0]?.level ?? 1;
-
-    // (옵션) 프론트에서 level을 전송하면 1~4에 한해 override
     const bodyLv = Number(req.body?.level);
-    if ([1, 2, 3, 4].includes(bodyLv)) userLevel = bodyLv;
+    if ([1,2,3,4].includes(bodyLv)) userLevel = bodyLv;
 
-    // 1) 이미 있으면 그대로 반환 (+ level 포함)
-    const checkQuery = `
-      SELECT study_id, content
-        FROM today_study
-       WHERE date = $1
-         AND user_id = $2
-       LIMIT 1
-    `;
-    const existing = await pool.query(checkQuery, [today, userId]);
-
-    if (existing.rows.length > 0) {
-      return res.json({
-        success: true,
-        result: existing.rows[0].content,
-        studyId: existing.rows[0].study_id,
-        level: userLevel
-      });
+    // 이미 있으면 재사용 (단, refresh=1이면 무시하고 새로 생성)
+    if (!forceRefresh) {
+      const existed = await pool.query(
+        'SELECT study_id, content FROM today_study WHERE date=$1 AND user_id=$2 LIMIT 1',
+        [today, userId]
+      );
+      if (existed.rows.length > 0) {
+        return res.json({ success:true, result: existed.rows[0].content, studyId: existed.rows[0].study_id, level:userLevel });
+      }
     }
 
-    const topics = ['직장', '일상', '친구', '습관'];
-    const seed = Math.floor(Math.random() * 100000);
-
     const levelConfigs = {
-      1: { len: '300~350자', vocab: '아주 쉬운 일상 어휘', extra: '짧고 명확한 문장' },
-      2: { len: '380~420자', vocab: '쉬운~보통 어휘',      extra: '간단한 접속사/부사' },
-      3: { len: '450~500자', vocab: '보통 난이도 어휘',    extra: '복문과 다양한 표현' },
-      4: { len: '500~550자', vocab: '약간 높은 난이도 어휘', extra: '구체적 묘사와 미묘한 뉘앙스' },
+      1:{len:'300~350자', vocab:'아주 쉬운 일상 어휘', extra:'짧고 명확한 문장'},
+      2:{len:'380~420자', vocab:'쉬운~보통 어휘', extra:'간단한 접속사/부사'},
+      3:{len:'450~500자', vocab:'보통 난이도 어휘', extra:'복문과 다양한 표현'},
+      4:{len:'500~550자', vocab:'약간 높은 난이도 어휘', extra:'구체적 묘사와 미묘한 뉘앙스'},
     };
     const cfg = levelConfigs[userLevel] ?? levelConfigs[1];
 
-    const prompt = `
-오늘 날짜: ${today}, 난수: ${seed}
-주제 후보: ${topics.join(', ')} (최근 7일 내 쓴 주제와 중복 금지, 1개만 선택)
-[작성 규칙 — 사용자 레벨 ${userLevel}]
-- 분량: ${cfg.len}
-- 어휘: ${cfg.vocab}
-- 스타일: ${cfg.extra}
-- 오늘만의 포인트(사건/감정/관찰) 1개 포함
-- 출력은 본문 텍스트만 (코드블록/머리말 금지)
-`.trim();
+    const sys = {
+      role: 'system',
+      content: '너는 한국어 글쓰기 교사이자 작가다. 사용자에게 대화하지 말고, 요구한 본문만 정확히 작성한다.'
+    };
 
-    const gptRes = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-      },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+    const user = {
+      role: 'user',
+      content: [
+        `오늘 날짜: ${today}`,
+        `주제 후보: 직장, 일상, 친구, 습관 중 1개를 **내부적으로 임의 선택** (최근 7일 중복 금지).`,
+        `[작성 규칙 — 레벨 ${userLevel}]`,
+        `- 분량: ${cfg.len}`,
+        `- 어휘: ${cfg.vocab}`,
+        `- 스타일: ${cfg.extra}`,
+        `- 오늘만의 포인트(사건/감정/관찰) 1개 포함`,
+        `- **출력은 한국어 서술형 본문 1개 단락만**`,
+        `- **질문/제안/대화체/머리말/따옴표/코드블록/메타설명 금지**`,
+        `- **"주제", "하시겠어요", "원하시면" 같은 표현 사용 금지**`
+      ].join('\n')
+    };
+
+    // 최대 2회 재시도: 길이나 금칙어 검증
+    let generatedText = '';
+    for (let attempt=0; attempt<2; attempt++) {
+      const gptRes = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        { model: 'gpt-3.5-turbo', messages: [sys, user], temperature: 0.7 },
+        { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+      );
+      generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
+
+      const bad = /주제|하시겠어요|원하시|원하면|어떠신가요|\?/.test(generatedText);
+      const tooShort = generatedText.replace(/\s/g,'').length < 250;
+      const hasQuotes = /["“”'’]/.test(generatedText);
+      if (!bad && !tooShort && !hasQuotes) break;
+      if (attempt === 1) {
+        // 마지막 시도에도 불만족이면 강제로 정제
+        generatedText = generatedText
+          .replace(/["“”'’]/g,'')
+          .replace(/(^|\n).*?(주제|하시겠|원하시|어떠신|요\?).*?\n?/g,'')
+          .trim();
+      }
+    }
+
+    const upsert = await pool.query(
+      `INSERT INTO today_study (user_id, content, date)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (user_id,date) DO UPDATE SET content=EXCLUDED.content
+       RETURNING study_id`,
+      [userId, generatedText, today]
     );
 
-    const generatedText = gptRes.data.choices[0].message.content;
-
-    // 3) UPSERT 저장 (user_id, date 유니크)
-    const insertQuery = `
-      INSERT INTO today_study (user_id, content, date)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id, date)
-      DO UPDATE SET content = EXCLUDED.content
-      RETURNING study_id
-    `;
-    const inserted = await pool.query(insertQuery, [userId, generatedText, today]);
-    const studyId = inserted.rows[0].study_id;
-
-    // 4) 단어 자동 추출 저장 (기능 동일)
+    const studyId = upsert.rows[0].study_id;
     await saveVocabulary(studyId, generatedText);
 
-    res.json({ success: true, result: generatedText, studyId, level: userLevel });
+    return res.json({ success:true, result: generatedText, studyId, level: userLevel });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: 'GPT API 오류' });
+    res.status(500).json({ success:false, message:'GPT API 오류' });
   }
 };
 
