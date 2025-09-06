@@ -286,4 +286,7 @@ router.patch('/me/vocabulary/:vocabId/like', auth, requireLogin, toggleMyVocabul
  *       401: { description: 인증 필요 }
  */
 router.get('/me/vocabulary/liked', auth, requireLogin, getMyLikedVocabulary);
+// 단일 스냅샷 저장(히스토리 없이)
+router.post('/me/nickname-test/result', auth, requireLogin, saveNicknameTestIntoUsers);
+
 module.exports = router;

@@ -550,6 +550,80 @@ exports.getMyLikedVocabulary = async (req, res) => {
   }
 };
 
+// === 닉네임 테스트 결과를 users 테이블 "한 벌"로만 저장 ===
+// POST /api/me/nickname-test/result
+// body: { nicknameTitle?: string, vocabCorrect: number(0..9), readingCorrect: number(0..9) }
+exports.saveNicknameTestIntoUsers = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+  try {
+    let { nicknameTitle, vocabCorrect, readingCorrect } = req.body || {};
+
+    // 0) 개수 유효성
+    if (!Number.isInteger(vocabCorrect) || vocabCorrect < 0 || vocabCorrect > 9 ||
+        !Number.isInteger(readingCorrect) || readingCorrect < 0 || readingCorrect > 9) {
+      return res.status(400).json({ success:false, message:'정답 개수는 0~9 사이 정수여야 합니다.' });
+    }
+
+    // 1) 서버에서도 티어 계산(프론트 조작 대비, 또는 미입력 대비)
+    const toTier = (n) => (n >= 7 ? '상' : n >= 4 ? '중' : '하');
+    const vocabTier   = toTier(vocabCorrect);
+    const readingTier = toTier(readingCorrect);
+
+    // 2) 별명 매핑 (프론트가 준 별명이 있으면 그대로 저장)
+    const toNickname = (vt, rt) => {
+      if (vt === '상' && rt === '상') return '언어연금술사';
+      if (vt === '하' && rt === '상') return '눈치번역가';
+      if (vt === '하' && rt === '중') return '감각해석가';
+      if (vt === '중' && rt === '상') return '맥락추리자';
+      if (vt === '중' && rt === '중') return '언어균형술사';
+      if (vt === '중' && rt === '하') return '낱말며행자';
+      if (vt === '상' && rt === '하') return '단어수집가';
+      if (vt === '상' && rt === '중') return '의미해석가';
+      return '언어모험가'; // 하+하
+    };
+
+    if (typeof nicknameTitle !== 'string' || nicknameTitle.trim() === '') {
+      nicknameTitle = toNickname(vocabTier, readingTier);
+    } else {
+      nicknameTitle = nicknameTitle.trim();
+    }
+
+    // 3) users만 업데이트 (히스토리 저장 없음)
+    const q = `
+      UPDATE users
+         SET vocab_tier       = $2,
+             reading_tier     = $3,
+             vocab_correct    = $4,
+             reading_correct  = $5,
+             nickname_title   = $6,
+             nickname_updated_at = NOW(),
+             updated_at       = NOW()
+       WHERE id = $1
+       RETURNING id, email, name, nickname, is_verified, level, point,
+                 vocab_tier, reading_tier, vocab_correct, reading_correct, nickname_title, nickname_updated_at
+    `;
+    const { rows } = await pool.query(q, [
+      userId,
+      vocabTier, readingTier,
+      vocabCorrect, readingCorrect,
+      nicknameTitle
+    ]);
+
+    return res.json({
+      success: true,
+      message: '별명 테스트가 저장되었습니다.',
+      result: rows[0]
+    });
+  } catch (e) {
+    console.error('saveNicknameTestIntoUsers error:', e);
+    return res.status(500).json({ success:false, message:'저장 실패' });
+  }
+};
+
+
+
 
 
 // const pool = require('../config/db');
