@@ -16,6 +16,7 @@ const {
   getMyVocabulary,
   toggleMyVocabularyLike,
   getMyLikedVocabulary,
+  saveNicknameTestIntoUsers 
 } = require('../controllers/authController');
 
 
