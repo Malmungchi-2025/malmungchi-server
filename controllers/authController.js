@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const pool = require('../config/db');
 const { sign } = require('../utils/jwt');
 const { sendMail } = require('../utils/mailer');
+const { renderOtpHtml, renderOtpPlain } = require('../utils/emailTemplates');  //메일 otp 템플릿 추가
 
 // 같은 트랜잭션 client 사용 (단일 정의만 유지)
 async function issueEmailToken(client, userId) {
@@ -104,6 +105,15 @@ exports.register = async (req, res) => {
     client.release();
   }
 };
+
+//이메일 인증 otp 메일 템플릿 적용
+const { renderOtpHtml, renderOtpPlain } = require('../utils/emailTemplates');
+const { sendMail } = require('../utils/mailer');
+
+function generateNumericOtp(digits = 6) {
+  const n = Math.floor(Math.random() * Math.pow(10, digits));
+  return n.toString().padStart(digits, '0');
+}
 
 // 2) 이메일 인증
 exports.verifyEmail = async (req, res) => {

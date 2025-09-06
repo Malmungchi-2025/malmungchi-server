@@ -3,6 +3,9 @@ const express = require('express');
 const router = express.Router();
 const { sendMail } = require('../utils/mailer'); // ★ 메일 발송 추가
 
+// ⬇️ 템플릿 import 추가
+const { renderOtpHtml, renderOtpPlain } = require('../utils/emailTemplates');
+
 // 이메일별 최근 OTP 저장 (인메모리)
 const otpStore = new Map();
 // 유효시간(초)
@@ -13,29 +16,33 @@ function gen6() {
 }
 
 // 1) OTP 요청
+// 1) OTP 요청
 router.post('/dev/request-otp', async (req, res) => {
   try {
-    const { email } = req.body || {};
+    const { email, name } = req.body || {}; // ← name 받으면 템플릿에 반영 가능
     if (!email) {
       return res.status(400).json({ success: false, message: 'email 필요' });
     }
 
     const key = email.toLowerCase().trim();
     const code = gen6();
+
+    const EXPIRES_SEC = 300; // 5분 (기존 값 유지)
     const expiresAt = Date.now() + EXPIRES_SEC * 1000;
     otpStore.set(key, { code, expiresAt });
 
-    console.log(`[DEV][OTP] ${key} -> ${code} (5분 유효)`);
+    const minutes = Math.floor(EXPIRES_SEC / 60) || 1;
+    const displayName = name || ''; // 없으면 빈 문자열
 
-    // ★ 실제 메일 전송
+    // ✅ 템플릿 적용
+    const html = renderOtpHtml(displayName, code, minutes);
+    const text = renderOtpPlain(displayName, code, minutes);
+
     const mailed = await sendMail({
       to: key,
-      subject: '[말뭉치] 개발용 OTP 코드',
-      html: `
-        <p>아래 일회용 코드로 인증을 진행하세요. (5분 유효)</p>
-        <h2 style="font-size:24px;letter-spacing:2px">${code}</h2>
-      `,
-      text: `OTP: ${code} (5분 유효)`,
+      subject: `[말뭉치] 인증 코드 ${code} (${minutes}분 유효)`,
+      html,
+      text,
     });
 
     return res.status(mailed ? 200 : 202).json({
@@ -49,6 +56,42 @@ router.post('/dev/request-otp', async (req, res) => {
     res.status(500).json({ success: false, message: 'OTP 생성 실패' });
   }
 });
+// router.post('/dev/request-otp', async (req, res) => {
+//   try {
+//     const { email } = req.body || {};
+//     if (!email) {
+//       return res.status(400).json({ success: false, message: 'email 필요' });
+//     }
+
+//     const key = email.toLowerCase().trim();
+//     const code = gen6();
+//     const expiresAt = Date.now() + EXPIRES_SEC * 1000;
+//     otpStore.set(key, { code, expiresAt });
+
+//     console.log(`[DEV][OTP] ${key} -> ${code} (5분 유효)`);
+
+//     // ★ 실제 메일 전송
+//     const mailed = await sendMail({
+//       to: key,
+//       subject: '[말뭉치] 개발용 OTP 코드',
+//       html: `
+//         <p>아래 일회용 코드로 인증을 진행하세요. (5분 유효)</p>
+//         <h2 style="font-size:24px;letter-spacing:2px">${code}</h2>
+//       `,
+//       text: `OTP: ${code} (5분 유효)`,
+//     });
+
+//     return res.status(mailed ? 200 : 202).json({
+//       success: true,
+//       message: mailed
+//         ? 'OTP 생성 및 메일 전송 완료'
+//         : 'OTP 생성은 완료. 메일 발송에 문제가 있습니다(서버 로그 확인).',
+//     });
+//   } catch (e) {
+//     console.error('dev/request-otp error:', e);
+//     res.status(500).json({ success: false, message: 'OTP 생성 실패' });
+//   }
+// });
 
 // 2) OTP 검증
 router.post('/dev/verify-otp', async (req, res) => {
