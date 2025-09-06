@@ -106,9 +106,7 @@ exports.register = async (req, res) => {
   }
 };
 
-//이메일 인증 otp 메일 템플릿 적용
-const { renderOtpHtml, renderOtpPlain } = require('../utils/emailTemplates');
-const { sendMail } = require('../utils/mailer');
+
 
 function generateNumericOtp(digits = 6) {
   const n = Math.floor(Math.random() * Math.pow(10, digits));
@@ -564,7 +562,7 @@ exports.getMyLikedVocabulary = async (req, res) => {
 // POST /api/auth/me/nickname-test/result
 // body: { nicknameTitle?: string, vocabCorrect: number(0..9), readingCorrect: number(0..9) }
 exports.saveNicknameTestIntoUsers = async (req, res) => {
-  const pool = require('../config/db'); // 상단에 이미 있다면 중복 제거하세요
+  //const pool = require('../config/db'); // 상단에 이미 있다면 중복 제거하세요
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
 

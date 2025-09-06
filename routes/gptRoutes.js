@@ -64,9 +64,9 @@ router.get('/study/by-date', gptController.getStudyByDate);
  *           example: "08"
  *     responses:
  *       200:
- *          description: |
- *          다음과 같은 문자열 배열입니다.
- *          ["2025-08-01","2025-08-03","..."] 형태로 반환
+ *         description: |
+ *           다음과 같은 문자열 배열입니다.
+ *           ["2025-08-01","2025-08-03","..."] 형태로 반환
  */
 router.get('/study/available-dates', gptController.getAvailableDates);
 
