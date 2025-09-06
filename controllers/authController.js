@@ -234,24 +234,50 @@ exports.login = async (req, res) => {
 };
 
 // 5) 내 정보
+// 5) 내 정보
 exports.me = async (req, res) => {
-  if (!req.user?.id) 
+  if (!req.user?.id) {
     return res.status(401).json({ success:false, message:'인증 필요' });
+  }
 
   try {
-    const r = await pool.query(
-      `SELECT id, email, name, nickname, is_verified, created_at, level
-       FROM users WHERE id = $1 LIMIT 1`,
-      [req.user.id]
-    );
+    const q = `
+      SELECT 
+        id, 
+        email, 
+        name, 
+        nickname, 
+        is_verified, 
+        created_at, 
+        level,
+        point
+      FROM users 
+      WHERE id = $1
+      LIMIT 1
+    `;
+    const { rows } = await pool.query(q, [req.user.id]);
+    const user = rows[0];
 
-    res.json({ 
-      success: true, 
-      result: r.rows[0] || null  // ✅ result로 변경
-    });
+    if (!user) {
+      return res.status(404).json({ success:false, message:'사용자를 찾을 수 없음' });
+    }
+
+    // (선택) null 안전 처리 및 카멜케이스로 변환하고 싶다면:
+    const result = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      nickname: user.nickname ?? '',
+      isVerified: user.is_verified,
+      createdAt: user.created_at, // 필요하면 ISO로 변환 new Date(user.created_at).toISOString()
+      level: user.level ?? 0,
+      point: user.point ?? 0,
+    };
+
+    return res.json({ success: true, result });
   } catch (e) {
     console.error('me error:', e);
-    res.status(500).json({ success:false, message:'조회 실패' });
+    return res.status(500).json({ success:false, message:'조회 실패' });
   }
 };
 
