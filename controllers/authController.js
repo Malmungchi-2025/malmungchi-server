@@ -281,6 +281,277 @@ exports.me = async (req, res) => {
   }
 };
 
+//최신 저장한 단어 5개 불러오는 api
+//1) 최신 저장 단어 5개 (마이페이지 상단)
+// GET /api/me/vocabulary/recent?limit=5
+exports.getMyRecentVocabulary = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 20) : 5;
+
+    const includeId = req.query.includeId === '1';
+    const includeLiked = req.query.includeLiked === '1';
+
+    const orderCol = (process.env.VOCAB_SORT_BY_CREATED_AT === '1') ? 'v.created_at' : 'v.id';
+    const sql = `
+      SELECT v.id, v.word, v.meaning, v.example, v.is_liked
+        FROM vocabulary v
+        JOIN today_study ts ON ts.study_id = v.study_id
+       WHERE ts.user_id = $1
+       ORDER BY ${orderCol} DESC
+       LIMIT $2
+    `;
+    const { rows } = await pool.query(sql, [userId, limit]);
+
+    return res.json({
+      success:true,
+      result: rows.map(r => ({
+        ...(includeId ? { id: r.id } : {}),
+        word: r.word,
+        meaning: r.meaning,
+        example: r.example,
+        ...(includeLiked ? { isLiked: r.is_liked } : {}),
+      })),
+      message: null
+    });
+  } catch (err) {
+    console.error('getMyRecentVocabulary error:', err);
+    return res.status(500).json({ success:false, message:'최근 단어 조회 실패' });
+  }
+};
+
+//전체 목록 (최근 → 오래된 순) + 커서 기반 페이지네이션
+// GET /api/me/vocabulary?limit=20&lastId=12345
+//   - 첫 페이지: lastId 없이 호출
+//   - 다음 페이지: 직전 응답의 nextCursor를 lastId로 전달
+exports.getMyVocabulary = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 50) : 20;
+
+    const includeId = req.query.includeId === '1';
+    const includeLiked = req.query.includeLiked === '1';
+
+    if (process.env.VOCAB_SORT_BY_CREATED_AT === '1') {
+      const lastCreatedAt = req.query.lastCreatedAt ? new Date(req.query.lastCreatedAt) : null;
+      const lastId = req.query.lastId ? Number(req.query.lastId) : null;
+
+      const whereCursor = (lastCreatedAt && Number.isFinite(lastId))
+        ? `AND (v.created_at < $2 OR (v.created_at = $2 AND v.id < $3))`
+        : ``;
+
+      const sql = `
+        SELECT v.id, v.word, v.meaning, v.example, v.created_at, v.is_liked
+          FROM vocabulary v
+          JOIN today_study ts ON ts.study_id = v.study_id
+         WHERE ts.user_id = $1
+           ${whereCursor}
+         ORDER BY v.created_at DESC, v.id DESC
+         LIMIT ${limit + 1}
+      `;
+      const params = (lastCreatedAt && Number.isFinite(lastId))
+        ? [userId, lastCreatedAt.toISOString(), lastId]
+        : [userId];
+
+      const { rows } = await pool.query(sql, params);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      return res.json({
+        success: true,
+        result: page.map(r => ({
+          ...(includeId ? { id: r.id } : {}),
+          word: r.word,
+          meaning: r.meaning,
+          example: r.example,
+          ...(includeLiked ? { isLiked: r.is_liked } : {}),
+        })),
+        message: null,
+        nextCursor: hasMore
+          ? { lastCreatedAt: page[page.length - 1].created_at, lastId: page[page.length - 1].id }
+          : null
+      });
+    }
+
+    // id 커서
+    const lastId = req.query.lastId ? Number(req.query.lastId) : null;
+    const sql = `
+      SELECT v.id, v.word, v.meaning, v.example, v.is_liked
+        FROM vocabulary v
+        JOIN today_study ts ON ts.study_id = v.study_id
+       WHERE ts.user_id = $1
+         ${Number.isFinite(lastId) ? 'AND v.id < $2' : ''}
+       ORDER BY v.id DESC
+       LIMIT ${limit + 1}
+    `;
+    const params = Number.isFinite(lastId) ? [userId, lastId] : [userId];
+    const { rows } = await pool.query(sql, params);
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+
+    return res.json({
+      success: true,
+      result: page.map(r => ({
+        ...(includeId ? { id: r.id } : {}),
+        word: r.word,
+        meaning: r.meaning,
+        example: r.example,
+        ...(includeLiked ? { isLiked: r.is_liked } : {}),
+      })),
+      message: null,
+      nextCursor: hasMore ? { lastId: page[page.length - 1].id } : null
+    });
+  } catch (err) {
+    console.error('getMyVocabulary error:', err);
+    return res.status(500).json({ success:false, message:'단어 목록 조회 실패' });
+  }
+};
+
+// ✅ 1) 단어 좋아요 토글
+// PATCH /api/auth/me/vocabulary/:vocabId/like  body: { liked: true|false }
+exports.toggleMyVocabularyLike = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const vocabId = Number(req.params.vocabId);
+    const liked = !!req.body?.liked;
+    if (!Number.isFinite(vocabId)) {
+      return res.status(400).json({ success:false, message:'잘못된 vocabId' });
+    }
+
+    // 소유권 검증 (내 today_study에 속한 vocabulary 인지)
+    const ownCheck = await pool.query(
+      `SELECT 1
+         FROM vocabulary v
+         JOIN today_study ts ON ts.study_id = v.study_id
+        WHERE v.id = $1 AND ts.user_id = $2
+        LIMIT 1`,
+      [vocabId, userId]
+    );
+    if (ownCheck.rowCount === 0) {
+      return res.status(404).json({ success:false, message:'단어가 없거나 접근 권한이 없습니다.' });
+    }
+
+    // 토글
+    const { rows } = await pool.query(
+      `UPDATE vocabulary
+          SET is_liked = $2
+        WHERE id = $1
+        RETURNING id, is_liked`,
+      [vocabId, liked]
+    );
+
+    return res.json({
+      success: true,
+      result: { id: rows[0].id, isLiked: rows[0].is_liked },
+      message: liked ? '즐겨찾기에 추가되었습니다.' : '즐겨찾기가 해제되었습니다.'
+    });
+  } catch (err) {
+    console.error('toggleMyVocabularyLike error:', err);
+    return res.status(500).json({ success:false, message:'즐겨찾기 변경 실패' });
+  }
+};
+
+// ✅ getMyLikedVocabulary (created_at 모드) 수정본
+exports.getMyLikedVocabulary = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 50) : 20;
+
+    const includeId = req.query.includeId === '1';
+    const includeLiked = req.query.includeLiked === '1';
+
+    if (process.env.VOCAB_SORT_BY_CREATED_AT === '1') {
+      const lastCreatedAt = req.query.lastCreatedAt ? new Date(req.query.lastCreatedAt) : null;
+      const lastId = req.query.lastId ? Number(req.query.lastId) : null;
+
+      const whereCursor = (lastCreatedAt && Number.isFinite(lastId))
+        ? `AND (v.created_at < $2 OR (v.created_at = $2 AND v.id < $3))`
+        : ``;
+
+      const sql = `
+        SELECT v.id, v.word, v.meaning, v.example, v.created_at, v.is_liked
+          FROM vocabulary v
+          JOIN today_study ts ON ts.study_id = v.study_id
+         WHERE ts.user_id = $1
+           AND v.is_liked = true
+           ${whereCursor}
+         ORDER BY v.created_at DESC, v.id DESC
+         LIMIT ${limit + 1}
+      `;
+      const params = (lastCreatedAt && Number.isFinite(lastId))
+        ? [userId, lastCreatedAt.toISOString(), lastId]
+        : [userId];
+
+      const { rows } = await pool.query(sql, params);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      return res.json({
+        success: true,
+        result: page.map(r => ({
+          ...(includeId ? { id: r.id } : {}),
+          word: r.word,
+          meaning: r.meaning,
+          example: r.example,
+          ...(includeLiked ? { isLiked: r.is_liked } : {}),
+        })),
+        message: null,
+        nextCursor: hasMore
+          ? { lastCreatedAt: page[page.length - 1].created_at, lastId: page[page.length - 1].id }
+          : null
+      });
+    }
+
+    // id 커서
+    const lastId = req.query.lastId ? Number(req.query.lastId) : null;
+    const sql = `
+      SELECT v.id, v.word, v.meaning, v.example, v.is_liked
+        FROM vocabulary v
+        JOIN today_study ts ON ts.study_id = v.study_id
+       WHERE ts.user_id = $1
+         AND v.is_liked = true
+         ${Number.isFinite(lastId) ? 'AND v.id < $2' : ''}
+       ORDER BY v.id DESC
+       LIMIT ${limit + 1}
+    `;
+    const params = Number.isFinite(lastId) ? [userId, lastId] : [userId];
+    const { rows } = await pool.query(sql, params);
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+
+    return res.json({
+      success: true,
+      result: page.map(r => ({
+        ...(includeId ? { id: r.id } : {}),
+        word: r.word,
+        meaning: r.meaning,
+        example: r.example,
+        ...(includeLiked ? { isLiked: r.is_liked } : {}),
+      })),
+      message: null,
+      nextCursor: hasMore ? { lastId: page[page.length - 1].id } : null
+    });
+  } catch (err) {
+    console.error('getMyLikedVocabulary error:', err);
+    return res.status(500).json({ success:false, message:'즐겨찾기 목록 조회 실패' });
+  }
+};
+
+
+
 // const pool = require('../config/db');
 // const jwt = require('jsonwebtoken');
 // const bcrypt = require('bcryptjs');

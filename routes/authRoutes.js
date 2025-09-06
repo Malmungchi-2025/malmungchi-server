@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { sendMail } = require('../utils/mailer'); // ★ 추가
 
+
 // 컨트롤러
 const {
   register,
@@ -10,6 +11,11 @@ const {
   verifyEmail,
   resendVerification,
   me,
+  // ✅ 추가: 단어 목록 API
+  getMyRecentVocabulary,
+  getMyVocabulary,
+  toggleMyVocabularyLike,
+  getMyLikedVocabulary,
 } = require('../controllers/authController');
 
 
@@ -153,4 +159,131 @@ router.post('/login', loginUser);
  */
 router.get('/me', auth, requireLogin, me);
 
+/**
+ * @swagger
+ * /api/auth/me/vocabulary/recent:
+ *   get:
+ *     summary: 최신 저장 단어 N개 조회 (기본 5개)
+ *     description: 사용자가 저장한 단어 중 최신순으로 N개를 반환합니다.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+ *         description: 반환 개수 (최대 20)
+ *       - in: query
+ *         name: includeId
+ *         schema: { type: string, enum: ['0','1'], default: '0' }
+ *         description: 응답에 vocab id 포함 여부
+ *       - in: query
+ *         name: includeLiked
+ *         schema: { type: string, enum: ['0','1'], default: '0' }
+ *         description: 응답에 isLiked 포함 여부
+ *     responses:
+ *       200:
+ *         description: 성공
+ */
+router.get('/me/vocabulary/recent', auth, requireLogin, getMyRecentVocabulary);
+
+/**
+ * @swagger
+ * /api/auth/me/vocabulary:
+ *   get:
+ *     summary: 저장 단어 전체 목록 (최신→과거) 페이지네이션
+ *     description: created_at 정렬(ENV `VOCAB_SORT_BY_CREATED_AT=1`) 또는 id 정렬 기반 커서 페이지네이션.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+ *         description: 페이지당 개수
+ *       - in: query
+ *         name: lastCreatedAt
+ *         schema: { type: string, format: date-time }
+ *         description: created_at 모드일 때 커서
+ *       - in: query
+ *         name: lastId
+ *         schema: { type: integer }
+ *         description: id 커서(또는 created_at 모드에서 튜플 커서의 id)
+ *       - in: query
+ *         name: includeId
+ *         schema: { type: string, enum: ['0','1'], default: '0' }
+ *         description: 응답에 vocab id 포함 여부
+ *       - in: query
+ *         name: includeLiked
+ *         schema: { type: string, enum: ['0','1'], default: '0' }
+ *         description: 응답에 isLiked 포함 여부
+ *     responses:
+ *       200:
+ *         description: 성공
+ */
+router.get('/me/vocabulary', auth, requireLogin, getMyVocabulary);
+
+/**
+ * @swagger
+ * /api/auth/me/vocabulary/{vocabId}/like:
+ *   patch:
+ *     summary: 단어 즐겨찾기/해제 (별 토글)
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: vocabId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: vocabulary PK
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [liked]
+ *             properties:
+ *               liked: { type: boolean, example: true }
+ *     responses:
+ *       200: { description: 성공 }
+ *       401: { description: 인증 필요 }
+ *       404: { description: 권한 없음/존재하지 않음 }
+ */
+router.patch('/me/vocabulary/:vocabId/like', auth, requireLogin, toggleMyVocabularyLike);
+
+/**
+ * @swagger
+ * /api/auth/me/vocabulary/liked:
+ *   get:
+ *     summary: 즐겨찾기한 단어 목록 (최신→과거)
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+ *       - in: query
+ *         name: lastCreatedAt
+ *         schema: { type: string, format: date-time }
+ *         description: created_at 모드일 때 커서
+ *       - in: query
+ *         name: lastId
+ *         schema: { type: integer }
+ *         description: id 또는 튜플 커서용 id
+ *       - in: query
+ *         name: includeId
+ *         schema: { type: string, enum: ['0','1'], default: '1' }
+ *         description: 응답에 vocab id 포함 여부
+ *       - in: query
+ *         name: includeLiked
+ *         schema: { type: string, enum: ['0','1'], default: '1' }
+ *         description: 응답에 isLiked 포함 여부
+ *     responses:
+ *       200: { description: 성공 }
+ *       401: { description: 인증 필요 }
+ */
+router.get('/me/vocabulary/liked', auth, requireLogin, getMyLikedVocabulary);
 module.exports = router;
