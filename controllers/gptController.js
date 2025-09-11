@@ -1478,8 +1478,6 @@ function normalizeItems(rawItems) {
   return items.slice(0,7);
 }
 
-// =============== Controller ===============
-
 // POST /api/gpt/quiz
 // body: { category: '취업준비'|'기초'|'활용'|'심화'|'고급', len?: number }
 // req.user.id 가 있다고 가정(미들웨어에서 주입)
@@ -1487,13 +1485,11 @@ exports.createOrGetBatch = async (req, res) => {
   const userId = req.user?.id;
   const categoryKor = String(req.body?.category || '').trim();
   const len = Number(req.body?.len || 80);
-
   if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
   if (!CATEGORY_MAP[categoryKor]) {
     return res.status(400).json({ success:false, message:'category(한글) 값이 올바르지 않습니다.' });
   }
   const categoryCode = CATEGORY_MAP[categoryKor];
-
   const client = await pool.connect();
   try {
     // 1) 오늘자 동일 카테고리 가장 최근 세트 재사용(요청문 관례) :contentReference[oaicite:2]{index=2}
@@ -1505,7 +1501,6 @@ exports.createOrGetBatch = async (req, res) => {
        LIMIT 1`,
       [userId, categoryCode]
     );
-
     let batchId;
     if (reuse.rows[0]) {
       batchId = reuse.rows[0].id;
@@ -1549,20 +1544,18 @@ exports.createOrGetBatch = async (req, res) => {
         idx++;
       }
     }
-
-    // 3) 조회 형태로 응답(화면 VM이 바로 바인딩 가능) :contentReference[oaicite:3]{index=3}
-    const rows = await client.query(
-      `SELECT question_index, type,
-              text, options_json, correct_option_id,
-              statement, answer_is_o,
-              guide, sentence, underline_text, answer_text, explanation
-       FROM quiz_question
-       WHERE batch_id = $1
-       ORDER BY question_index`,
-      [batchId]
-    );
-
-    // 화면 모델에 맞춘 변환
+      // 3) 조회 형태로 응답(화면 VM이 바로 바인딩 가능) :contentReference[oaicite:3]{index=3}
+      const rows = await client.query(
+        `SELECT question_index, type,
+                text, options_json, correct_option_id,
+                statement, answer_is_o,
+                guide, sentence, underline_text, answer_text, explanation
+         FROM quiz_question
+         WHERE batch_id = $1
+         ORDER BY question_index`,
+        [batchId]
+      );
+       // 화면 모델에 맞춘 변환
     const steps = rows.rows.map(r => {
       if (r.type === 'MCQ') {
         return {
@@ -1589,7 +1582,6 @@ exports.createOrGetBatch = async (req, res) => {
         };
       }
     });
-
     return res.json({
       success: true,
       result: {
@@ -1606,13 +1598,11 @@ exports.createOrGetBatch = async (req, res) => {
     client.release();
   }
 };
-
 // GET /api/gpt/quiz/:batchId
 exports.getBatch = async (req, res) => {
   const userId = req.user?.id;
   const batchId = Number(req.params.batchId);
   if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
-
   try {
     const own = await pool.query(
       `SELECT 1 FROM quiz_batch WHERE id = $1 AND user_id = $2`,
@@ -1621,7 +1611,6 @@ exports.getBatch = async (req, res) => {
     if (!own.rows[0]) {
       return res.status(404).json({ success:false, message:'세트를 찾을 수 없습니다.' });
     }
-
     const rows = await pool.query(
       `SELECT question_index, type,
               text, options_json, correct_option_id,
@@ -1632,7 +1621,6 @@ exports.getBatch = async (req, res) => {
        ORDER BY question_index`,
       [batchId]
     );
-
     const steps = rows.rows.map(r => {
       if (r.type === 'MCQ') {
         return { index:r.question_index, type:r.type, text:r.text, options:r.options_json||[], correctOptionId:r.correct_option_id, explanation:r.explanation };
@@ -1642,7 +1630,6 @@ exports.getBatch = async (req, res) => {
         return { index:r.question_index, type:r.type, guide:r.guide, sentence:r.sentence, underlineText:r.underline_text, answerText:r.answer_text, explanation:r.explanation };
       }
     });
-
     return res.json({ success:true, result:{ batchId, total: steps.length, steps }});
   } catch (e) {
     console.error(e);
@@ -1655,7 +1642,6 @@ exports.getBatch = async (req, res) => {
 function norm(s) {
   return (s || '').trim().toLowerCase().replace(/\s+/g,' ').normalize('NFC');
 }
-
 exports.submitAndGrade = async (req, res) => {
   const userId = req.user?.id;
   const { batchId, questionIndex, payload } = req.body || {};
@@ -1663,7 +1649,6 @@ exports.submitAndGrade = async (req, res) => {
   if (!batchId || !questionIndex) {
     return res.status(400).json({ success:false, message:'batchId, questionIndex 필요' });
   }
-
   const client = await pool.connect();
   try {
     const q = await client.query(
@@ -1691,7 +1676,6 @@ exports.submitAndGrade = async (req, res) => {
     } else if (step.type === 'SHORT' && step.answer_text) {
       isCorrect = (norm(textAnswer) === norm(step.answer_text));
     }
-
     await client.query(
       `INSERT INTO quiz_response
          (user_id, batch_id, question_id, question_index, type,
@@ -1707,7 +1691,6 @@ exports.submitAndGrade = async (req, res) => {
          submitted_at       = now()`,
       [userId, batchId, step.id, questionIndex, step.type, selOpt, selIsO, textAnswer, isCorrect]
     );
-
     return res.json({ success:true, result:{ isCorrect } });
   } catch (e) {
     console.error(e);
@@ -1716,13 +1699,11 @@ exports.submitAndGrade = async (req, res) => {
     client.release();
   }
 };
-
 // GET /api/gpt/summary/daily?date=YYYY-MM-DD
 exports.getDailySummary = async (req, res) => {
   const userId = req.user?.id;
   const date = String(req.query?.date || '').trim();
   if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
-
   try {
     const rows = await pool.query(
       `SELECT * FROM v_quiz_daily_summary WHERE user_id = $1 ${date ? 'AND ymd = $2' : ''} ORDER BY ymd DESC`,
@@ -1734,5 +1715,6 @@ exports.getDailySummary = async (req, res) => {
     return res.status(500).json({ success:false, message:'일자별 요약 조회 실패' });
   }
 };
+
 
 
