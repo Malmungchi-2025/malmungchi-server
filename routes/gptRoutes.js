@@ -406,210 +406,225 @@ router.post('/level-test/generate', gptController.generateLevelTest);
  */
 router.post('/level-test/submit', gptController.submitLevelTest);
 
+/* ------------------------------------------------------------------
+ * 🧩 퀴즈 뭉치 API (안드 VM: MCQ → OX → SHORT, 총 7문항)
+ *  - POST /api/gpt/quiz           : 카테고리별 오늘자 세트 생성/재사용
+ *  - GET  /api/gpt/quiz/:batchId  : 세트 조회
+ *  - POST /api/gpt/quiz/submit    : 문항 단위 제출/채점
+ *  - GET  /api/gpt/summary/daily  : 날짜별 정답률 요약
+ * ------------------------------------------------------------------*/
+
+/**
+ * @swagger
+ * /api/gpt/quiz:
+ *   post:
+ *     summary: 카테고리별 7문항 세트 생성/재사용 (MCQ 3, OX 2, SHORT 2)
+ *     description: 같은 날 같은 카테고리는 가장 최근 세트를 재사용합니다.
+ *     tags: [Quiz]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [category]
+ *             properties:
+ *               category:
+ *                 type: string
+ *                 enum: [취업준비, 기초, 활용, 심화, 고급]
+ *               len:
+ *                 type: integer
+ *                 example: 80
+ *                 description: 각 문제 지문 길이 힌트 (선택)
+ *     responses:
+ *       200:
+ *         description: 생성 또는 재사용 성공
+ */
+router.post('/quiz', gptController.createOrGetBatch);
+
+/**
+ * @swagger
+ * /api/gpt/quiz/{batchId}:
+ *   get:
+ *     summary: 생성된 7문항 세트 조회
+ *     tags: [Quiz]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: batchId
+ *         in: path
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: 세트 조회 성공 }
+ *       404: { description: 세트를 찾을 수 없음 }
+ */
+router.get('/quiz/:batchId', gptController.getBatch);
+
+/**
+ * @swagger
+ * /api/gpt/quiz/submit:
+ *   post:
+ *     summary: 문항 단위 제출/채점(서버 판정 저장)
+ *     tags: [Quiz]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [batchId, questionIndex, payload]
+ *             properties:
+ *               batchId:       { type: integer, example: 101 }
+ *               questionIndex: { type: integer, example: 3 }
+ *               payload:
+ *                 type: object
+ *                 properties:
+ *                   selectedOptionId: { type: integer, example: 2 }
+ *                   selectedIsO:      { type: boolean, example: true }
+ *                   textAnswer:       { type: string,  example: "성찰" }
+ *                 description: MCQ/OX/SHORT 중 해당 타입에 맞는 필드만 전송
+ *     responses:
+ *       200: { description: 저장/채점 성공 }
+ *       404: { description: 문항을 찾을 수 없음 }
+ */
+router.post('/quiz/submit', gptController.submitAndGrade);
+
+/**
+ * @swagger
+ * /api/gpt/summary/daily:
+ *   get:
+ *     summary: 날짜별 퀴즈 응답 요약(정답수/정답률)
+ *     tags: [Quiz]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: date
+ *         in: query
+ *         required: false
+ *         schema: { type: string, pattern: '^\\d{4}-\\d{2}-\\d{2}$' }
+ *         description: 미전달 시 최근순 전체
+ *     responses:
+ *       200: { description: 요약 조회 성공 }
+ */
+router.get('/summary/daily', gptController.getDailySummary);
+
+/**
+ * @swagger
+ * /api/gpt/study/handwriting:
+ *   post:
+ *     summary: 사용자의 필사 내용 저장
+ *     tags: [Handwriting]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [study_id, content]
+ *             properties:
+ *               study_id: { type: integer }
+ *               content:  { type: string }
+ *     responses:
+ *       200: { description: 필사 저장 성공 }
+ */
+router.post('/study/handwriting', gptController.saveHandwriting);
+
+/**
+ * @swagger
+ * /api/gpt/study/handwriting/{studyId}:
+ *   get:
+ *     summary: 특정 학습의 필사 내용 조회
+ *     tags: [Handwriting]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: studyId
+ *         in: path
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: 필사 내용 반환 }
+ */
+router.get('/study/handwriting/:studyId', gptController.getHandwriting);
+
+/**
+ * @swagger
+ * /api/gpt/study/complete-reward:
+ *   post:
+ *     summary: 오늘의 학습 완료 시 포인트 지급 (하루 1회, +15)
+ *     tags: [GPT]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: 지급 성공 }
+ *       400: { description: 이미 지급됨 또는 학습 없음 }
+ */
+router.post('/study/complete-reward', gptController.giveTodayStudyPoint);
+
+/**
+ * @swagger
+ * /api/gpt/level-test/generate:
+ *   post:
+ *     summary: 레벨 테스트 생성 (DB 프리셋 기반 15문항)
+ *     tags: [LevelTest]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [stage]
+ *             properties:
+ *               stage:
+ *                 type: integer
+ *                 enum: [0,1,2,3]
+ *                 description: 0=초기 진단, 1=기초→활용, 2=활용→심화, 3=심화→고급
+ *     responses:
+ *       200: { description: 생성 성공 }
+ *       400: { description: 잘못된 요청 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/level-test/generate', gptController.generateLevelTest);
+
+/**
+ * @swagger
+ * /api/gpt/level-test/submit:
+ *   post:
+ *     summary: 레벨 테스트 제출 및 채점
+ *     tags: [LevelTest]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [answers]
+ *             properties:
+ *               answers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [questionIndex, choice]
+ *                   properties:
+ *                     questionIndex: { type: integer }
+ *                     choice:        { type: string }
+ *     responses:
+ *       200: { description: 채점 성공 }
+ *       400: { description: 잘못된 요청 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/level-test/submit', gptController.submitLevelTest);
+
 module.exports = router;
-// const express = require('express');
-// const router = express.Router();
 
-// const gptController = require('../controllers/gptController');
-
-// /**
-//  * @swagger
-//  * /api/gpt/generate-quote:
-//  *   post:
-//  *     summary: GPT로 오늘의 학습 글귀 생성 (하루 1개, 단어 자동 저장)
-//  *     tags: [GPT]
-//  *     responses:
-//  *       200:
-//  *         description: 글귀 생성 성공
-//  */
-// router.post('/generate-quote', gptController.generateQuote);
-
-// /**
-//  * @swagger
-//  * /api/vocabulary/search:
-//  *   post:
-//  *     summary: 단어 정의 및 예문 조회 (GPT 호출만, DB 저장 없음)
-//  *     tags: [Vocabulary]
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             properties:
-//  *               word:
-//  *                 type: string
-//  *                 example: "습관"
-//  *     responses:
-//  *       200:
-//  *         description: 단어 정보 반환
-//  */
-// router.post('/vocabulary/search', gptController.searchWordDefinition);
-
-// /**
-//  * @swagger
-//  * /api/vocabulary:
-//  *   post:
-//  *     summary: 단어 저장 API (사용자가 저장 버튼 클릭 시 호출)
-//  *     tags: [Vocabulary]
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             properties:
-//  *               study_id:
-//  *                 type: integer
-//  *                 example: 1
-//  *               word:
-//  *                 type: string
-//  *                 example: "책임"
-//  *               meaning:
-//  *                 type: string
-//  *                 example: "맡아서 해야 할 일"
-//  *               example:
-//  *                 type: string
-//  *                 example: "그는 책임을 다했다."
-//  *     responses:
-//  *       200:
-//  *         description: 단어 저장 성공
-//  */
-// router.post('/vocabulary', gptController.saveVocabularyManual);
-
-// /**
-//  * @swagger
-//  * /api/vocabulary/{studyId}:
-//  *   get:
-//  *     summary: 특정 학습 문단(studyId)의 단어 목록 조회
-//  *     tags: [Vocabulary]
-//  *     parameters:
-//  *       - name: studyId
-//  *         in: path
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *     responses:
-//  *       200:
-//  *         description: 단어 목록 반환
-//  */
-// router.get('/vocabulary/:studyId', gptController.getVocabularyByStudy);
-
-// //퀴즈 생성
-// /**
-//  * @swagger
-//  * /api/gpt/generate-quiz:
-//  *   post:
-//  *     summary: GPT로 객관식 퀴즈 3개 생성 (유형 랜덤 선택, 중복 생성 방지)
-//  *     tags: [GPT]
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             properties:
-//  *               text:
-//  *                 type: string
-//  *                 description: 문제 생성을 위한 학습 글
-//  *               studyId:
-//  *                 type: string
-//  *                 description: 학습 ID (UUID)
-//  *     responses:
-//  *       200:
-//  *         description: 퀴즈 생성 성공
-//  */
-// router.post('/generate-quiz', gptController.generateQuiz);
-
-// //퀴즈 조회
-// /**
-//  * @swagger
-//  * /api/quiz/{studyId}:
-//  *   get:
-//  *     summary: 특정 학습 ID의 퀴즈 목록 조회
-//  *     tags: [Quiz]
-//  *     parameters:
-//  *       - name: studyId
-//  *         in: path
-//  *         required: true
-//  *         schema:
-//  *           type: string
-//  *         description: 학습 ID
-//  *     responses:
-//  *       200:
-//  *         description: 퀴즈 목록 반환
-//  */
-// router.get('/quiz/:studyId', gptController.getQuizzesByStudyId);
-
-// //퀴즈 응답 저장
-// /**
-//  * @swagger
-//  * /api/quiz/answer:
-//  *   post:
-//  *     summary: 사용자 퀴즈 응답 저장 (userChoice & isCorrect)
-//  *     tags: [Quiz]
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             properties:
-//  *               studyId:
-//  *                 type: string
-//  *               questionIndex:
-//  *                 type: integer
-//  *               userChoice:
-//  *                 type: string
-//  *               isCorrect:
-//  *                 type: boolean
-//  *     responses:
-//  *       200:
-//  *         description: 정답 저장 성공
-//  */
-// router.post('/quiz/answer', gptController.saveQuizAnswer);
-
-// //필사 저장
-// /**
-//  * @swagger
-//  * /api/study/handwriting:
-//  *   post:
-//  *     summary: 사용자의 필사 내용 저장
-//  *     tags: [Handwriting]
-//  *     requestBody:
-//  *       required: true
-//  *       content:
-//  *         application/json:
-//  *           schema:
-//  *             type: object
-//  *             properties:
-//  *               study_id:
-//  *                 type: string
-//  *               content:
-//  *                 type: string
-//  *     responses:
-//  *       200:
-//  *         description: 필사 저장 성공
-//  */
-// router.post('/study/handwriting', gptController.saveHandwriting);
-
-// //필사 조회
-// /**
-//  * @swagger
-//  * /api/study/handwriting/{studyId}:
-//  *   get:
-//  *     summary: 특정 학습의 필사 내용 조회
-//  *     tags: [Handwriting]
-//  *     parameters:
-//  *       - name: studyId
-//  *         in: path
-//  *         required: true
-//  *         schema:
-//  *           type: string
-//  *     responses:
-//  *       200:
-//  *         description: 필사 내용 반환
-//  */
-// router.get('/study/handwriting/:studyId', gptController.getHandwriting);
-
-// module.exports = router;
