@@ -1346,75 +1346,93 @@ const CATEGORY_MAP = {
 
 // 프롬프트(사용자 제공 형식 그대로 적용)
 function buildPrompt({ categoryKor, len = 80 }) {
-  const cfg = { category: categoryKor, len }; // 사용자가 준 서식 그대로 사용
+  const cfg = { category: categoryKor, len };
   return `
-너는 문해력 학습용 퀴즈 생성기야. 사용자에게 7문제(4지선다형 3개, O/X형 2개, 단답형 2개)를 랜덤으로 만들어줘.
-각 문제는 ${cfg.category} 수준에 맞게 생성하고, ${cfg.len}자 내외의 짧은 지문 또는 문장을 포함해.
+  너는 문해력 학습용 퀴즈 생성기야. 사용자에게 7문제(4지선다형 3개, O/X형 2개, 단답형 2개)를 랜덤으로 만들어줘. 각 문제는 ${cfg.category} 수준에 맞게 생성하고, ${cfg.len}자 내외의 짧은 지문 또는 문장을 포함해.
+  조건:
+  - 반드시 한국어로 작성
+  - 문제 난이도와 어휘 수준은 아래 기준에 맞출 것
+  - 문제 형식은 JSON 배열로 출력할 것
+  - 각 항목은 { "type": "...", "question": "...", "options": [...], "answer": "..." } 형식
+  - 단답형 문제는 ‘밑줄 친 단어를 상황에 맞게 바꿔 쓰세요’ 형태 포함
 
-조건:
-- 반드시 한국어로 작성
-- 문제 난이도와 어휘 수준은 아래 기준에 맞출 것
-- 문제 형식은 JSON 배열로 출력할 것
-- 각 항목은 { "type": "...", "question": "...", "options": [...], "answer": "..." } 형식
-- 단답형 문제는 ‘밑줄 친 단어를 상황에 맞게 바꿔 쓰세요’ 형태 포함
+  수준별 기준:
+  1) [취업준비] 프롬프트
+   취업준비중인 20대 사회초년생의 비즈니스 상황 속 활용 어휘를 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
+   조건:  자기소개서, 면접, 기업 커뮤니케이션 등 실제 취업 맥락에서 출제
+        혼동되기 쉬운 비즈니스 표현을 보기로 구성
+  -------------------------------------------------
+  2) [기초] 프롬프트
+   20대 사회초년생의 기초 어휘력을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
+   조건: 일상적이고 간단한 상황 속에서 출제
+        보기 단어는 서로 헷갈릴 수 있지만, 난이도는 낮게 설정
+  -------------------------------------------------
+  3) [활용] 프롬프트
+   20대 사회초년생의 실무적 어휘 활용 능력을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
+   조건: 직장/보고/공지/뉴스 등 실제 사회생활 맥락 반영
+        보기는 실제 상황에서 혼동될 수 있는 단어 포함
+  -------------------------------------------------
+  4) [심화] 프롬프트
+   20대 사회초년생의 논리적 사고와 표현을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
+   조건: 논리적 사고, 분석, 관점 관련 문장 맥락 반영
+        심화 어휘 사용 (예: ‘의의’, ‘분석’, ‘한계’, ‘갈등’)
+        보기는 유사한 의미지만 뉘앙스가 다른 단어들로 구성
+  -------------------------------------------------
+  5) [고급] 프롬프트
+   20대 사회초년생의 비판적 사고와 고급 어휘 활용을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
+   조건: 사회/인문학적 주제에 관련된 문맥에서 출제
+        고급 어휘 (예: ‘합의’, ‘구조’, ‘담론’, ‘성찰’) 포함
+        보기는 모두 비슷해 보이지만 뉘앙스가 뚜렷이 다른 단어로 구성
 
-수준별 기준:
-1) [취업준비] 프롬프트
-  취업준비중인 20대 사회초년생의 비즈니스 상황 속 활용 어휘를 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
-  조건:  자기소개서, 면접, 기업 커뮤니케이션 등 실제 취업 맥락에서 출제
-       혼동되기 쉬운 비즈니스 표현을 보기로 구성
--------------------------------------------------
-2) [기초] 프롬프트
-  20대 사회초년생의 기초 어휘력을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
-  조건: 일상적이고 간단한 상황 속에서 출제
-       보기 단어는 서로 헷갈릴 수 있지만, 난이도는 낮게 설정
--------------------------------------------------
-3) [활용] 프롬프트
-  20대 사회초년생의 실무적 어휘 활용 능력을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
-  조건: 직장/보고/공지/뉴스 등 실제 사회생활 맥락 반영
-       보기는 실제 상황에서 혼동될 수 있는 단어 포함
--------------------------------------------------
-4) [심화] 프롬프트
-  20대 사회초년생의 논리적 사고와 표현을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
-  조건: 논리적 사고, 분석, 관점 관련 문장 맥락 반영
-       심화 어휘 사용 (예: ‘의의’, ‘분석’, ‘한계’, ‘갈등’)
-       보기는 유사한 의미지만 뉘앙스가 다른 단어들로 구성
--------------------------------------------------
-5) [고급] 프롬프트
-  20대 사회초년생의 비판적 사고와 고급 어휘 활용을 점검할 수 있는 문해력 퀴즈 문제를 작성하세요.
-  조건: 사회/인문학적 주제에 관련된 문맥에서 출제
-       고급 어휘 (예: ‘합의’, ‘구조’, ‘담론’, ‘성찰’) 포함
-       보기는 모두 비슷해 보이지만 뉘앙스가 뚜렷이 다른 단어로 구성
+  추가 조건:
+  1. 문제 유형은 [사지선다형] / [O,X형] / [단답형]을 섞어 구성할 것.
+    - 사지선다형: 보기는 모두 그럴듯해야 하며, 정답은 1개만 명확히 존재할 것.
+    - OX형: 직장·사회생활 맥락에 맞는 짧은 지문 제시 후, 사실 여부 판단.
+    - 단답형: 단순 설명에 해당하는 단어 맞히기가 아닌, 빈칸 채우기·부분 단어 변경·문맥상 적절한 단어 선택 등의 문제로 출제.
+      또한 정답은 반드시 단어 1~2개로 명확해야 하며, 주관적 해석 여지를 아예 없앨 것.
 
-추가 조건:
-1. 문제 유형은 [사지선다형] / [O,X형] / [단답형]을 섞어 구성할 것.
- - 사지선다형: 보기는 모두 그럴듯해야 하며, 정답은 1개만 명확히 존재할 것.
- - OX형: 직장·사회생활 맥락에 맞는 짧은 지문 제시 후, 사실 여부 판단.
- - 단답형: 단순 설명에 해당하는 단어 맞히기가 아닌, 빈칸 채우기·부분 단어 변경·문맥상 적절한 단어 선택 등의 문제로 출제.
-   또한 정답은 반드시 단어 1~2개로 명확해야 하며, 주관적 해석 여지를 아예 없앨 것.
+  **중요: JSON 배열만 출력하세요. 코드블록(\`\`\`) 없이, 설명 없이.**
+  `;
+}
 
-**중요: JSON 배열만 출력하세요. 코드블록(\`\`\`) 없이, 설명 없이.**
-`;}
+// ★ JSON 배열 추출 보강: 코드블록/텍스트 섞여도 [] 구간만 뽑아 파싱 시도
+function tryParseJsonArray(text) {
+  try {
+    const arr = JSON.parse(text);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    // 첫 번째 대괄호 배열 구간만 캡처
+    const m = text.match(/\[[\s\S]*\]/);
+    if (m) {
+      try {
+        const arr2 = JSON.parse(m[0]);
+        return Array.isArray(arr2) ? arr2 : [];
+      } catch (_) { /* ignore */ }
+    }
+    return [];
+  }
+}
 
-// 모델 호출 & JSON 파싱 유틸
+// 모델 호출 & JSON 파싱 유틸 (axios 버전)
 async function generateQuizArray(prompt) {
-  const resp = await openai.chat.completions.create({
-    model: 'gpt-4o-mini', // 필요시 환경변수로 분리
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.8
-  });
-  let text = resp.choices?.[0]?.message?.content || '[]';
-  // 코드펜스 제거/트레일링 텍스트 제거 방어
+  const resp = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o-mini',           // 기존과 동일하게
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.8,
+    },
+    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+  );
+
+  let text = resp.data?.choices?.[0]?.message?.content || '[]';
   text = text.trim()
     .replace(/^```json/gi,'')
     .replace(/^```/gi,'')
     .replace(/```$/gi,'')
     .trim();
-  let arr;
-  try { arr = JSON.parse(text); }
-  catch(e){ arr = []; }
-  if (!Array.isArray(arr)) arr = [];
-  return arr;
+
+  return tryParseJsonArray(text);
 }
 
 // GPT 결과를 우리 스키마에 맞게 정규화
@@ -1422,14 +1440,25 @@ function normalizeItems(rawItems) {
   const items = [];
   let mcq = 0, ox = 0, shortx = 0;
 
+  // ★ 공용 정규화 함수 (MCQ 텍스트 일치 시 대소문자/공백/NFC 무시)
+  const norm = (s) => String(s ?? '').trim().toLowerCase().normalize('NFC');
+
   for (const it of rawItems) {
     const t = String(it.type || '').toUpperCase();
+
     if (t.includes('OX')) {
       if (ox >= 2) continue;
+      // ★ OX 정답 파싱 관용성
+      const a = String(it.answer ?? '').trim().toUpperCase();
+      let answerIsO = null;
+      if (['O','TRUE','T','1','YES','Y'].includes(a)) answerIsO = true;
+      else if (['X','FALSE','F','0','NO','N'].includes(a)) answerIsO = false;
+
       items.push({
         type: 'OX',
         statement: String(it.question || '').trim(),
-        answer_is_o: (String(it.answer || '').trim().toUpperCase() === 'O')
+        answer_is_o: answerIsO,
+        explanation: it.explanation ?? null
       });
       ox++;
     } else if (t.includes('단답') || t.includes('SHORT')) {
@@ -1438,41 +1467,54 @@ function normalizeItems(rawItems) {
         type: 'SHORT',
         guide: '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.',
         sentence: String(it.question || '').trim(),
-        underline_text: null,
-        answer_text: String(it.answer || '').trim()
+        underline_text: it.underline_text ?? null,
+        answer_text: String(it.answer || '').trim(),
+        explanation: it.explanation ?? null
       });
       shortx++;
     } else { // MCQ
       if (mcq >= 3) continue;
       const opts = Array.isArray(it.options) ? it.options : [];
       const answer = String(it.answer || '').trim();
-      // 보기와 정답 매칭 (일치 텍스트의 인덱스)
+
       let correctId = null;
       const mapped = opts.map((o, idx) => {
         const label = typeof o === 'string' ? o : (o?.label ?? o?.text ?? '');
-        if (label === answer && correctId === null) correctId = idx + 1;
         return { id: idx + 1, label: String(label) };
       });
+
+      // 숫자 인덱스 허용
+      const asNum = Number(answer);
+      if (!Number.isNaN(asNum) && asNum >= 1 && asNum <= mapped.length) {
+        correctId = asNum;
+      } else {
+        // 1) 완전일치
+        for (const m of mapped) {
+          if (m.label === answer) { correctId = m.id; break; }
+        }
+        // ★ 2) 정규화 일치(nfc/소문자/공백)
+        if (correctId == null) {
+          const ansN = norm(answer);
+          for (const m of mapped) {
+            if (norm(m.label) === ansN) { correctId = m.id; break; }
+          }
+        }
+      }
+
       items.push({
         type: 'MCQ',
         text: String(it.question || '').trim(),
         options: mapped,
         correct_option_id: correctId, // 없을 수도 있으므로 서버 채점 시 null 체크
+        explanation: it.explanation ?? null
       });
       mcq++;
     }
     if (items.length === 7) break;
   }
 
-  // 혹시 부족하면 간단한 더미로 채움(실서비스는 재호출 권장)
-  while (items.length < 7) {
-    items.push({
-      type: 'OX',
-      statement: '임시 문장입니다. 사실인가요?',
-      answer_is_o: false
-    });
-  }
-  // 화면 진행 순서 고정: MCQ→OX→SHORT
+  // ★ 운영권장: 부족 시 재호출하도록 createOrGetBatch에서 재시도. (여긴 더미 보충 제거)
+  // 정렬: 화면 진행 순서 고정: MCQ→OX→SHORT
   const orderScore = { 'MCQ': 1, 'OX': 2, 'SHORT': 3 };
   items.sort((a,b) => orderScore[a.type]-orderScore[b.type]);
   return items.slice(0,7);
@@ -1485,77 +1527,100 @@ exports.createOrGetBatch = async (req, res) => {
   const userId = req.user?.id;
   const categoryKor = String(req.body?.category || '').trim();
   const len = Number(req.body?.len || 80);
+
   if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
   if (!CATEGORY_MAP[categoryKor]) {
     return res.status(400).json({ success:false, message:'category(한글) 값이 올바르지 않습니다.' });
   }
   const categoryCode = CATEGORY_MAP[categoryKor];
+
   const client = await pool.connect();
   try {
-    // 1) 오늘자 동일 카테고리 가장 최근 세트 재사용(요청문 관례) :contentReference[oaicite:2]{index=2}
-    const reuse = await client.query(
-      `SELECT id FROM quiz_batch
-       WHERE user_id = $1 AND category = $2
-       AND (created_at AT TIME ZONE 'Asia/Seoul')::date = (now() AT TIME ZONE 'Asia/Seoul')::date
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [userId, categoryCode]
-    );
-    let batchId;
-    if (reuse.rows[0]) {
-      batchId = reuse.rows[0].id;
-    } else {
-      // 2) GPT로 생성 → 정규화 → 저장
-      const prompt = buildPrompt({ categoryKor, len });
-      const raw = await generateQuizArray(prompt);
-      const items = normalizeItems(raw);
+    await client.query('BEGIN');
 
-      const ins = await client.query(
-        `INSERT INTO quiz_batch (user_id, category, total)
-         VALUES ($1,$2,$3) RETURNING id`,
-        [userId, categoryCode, 7]
-      );
-      batchId = ins.rows[0].id;
+    // 1) GPT로 생성 → 정규화 (★ 부족 시 재호출 2회까지)
+    const prompt = buildPrompt({ categoryKor, len });
 
-      let idx = 1;
-      for (const it of items) {
-        if (it.type === 'MCQ') {
-          await client.query(
-            `INSERT INTO quiz_question
-             (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
-             VALUES ($1,$2,'MCQ',$3,$4,$5,$6)`,
-            [batchId, idx, it.text, JSON.stringify(it.options), it.correct_option_id, it.explanation ?? null]
-          );
-        } else if (it.type === 'OX') {
-          await client.query(
-            `INSERT INTO quiz_question
-             (batch_id, question_index, type, statement, answer_is_o, explanation)
-             VALUES ($1,$2,'OX',$3,$4,$5)`,
-            [batchId, idx, it.statement, it.answer_is_o, it.explanation ?? null]
-          );
-        } else { // SHORT
-          await client.query(
-            `INSERT INTO quiz_question
-             (batch_id, question_index, type, guide, sentence, underline_text, answer_text, explanation)
-             VALUES ($1,$2,'SHORT',$3,$4,$5,$6,$7)`,
-            [batchId, idx, it.guide ?? null, it.sentence ?? null, it.underline_text ?? null, it.answer_text ?? null, it.explanation ?? null]
-          );
-        }
-        idx++;
+    let raw = await generateQuizArray(prompt);
+    let items = normalizeItems(raw);
+
+    let retries = 0;
+    while (items.length < 7 && retries < 2) {
+      retries++;
+      raw = await generateQuizArray(prompt);
+      const more = normalizeItems(raw);
+      // 타입별 부족분 채워넣기
+      const need = 7 - items.length;
+      for (const it of more) {
+        if (items.length >= 7) break;
+        // 동일 index/문구 중복 방지 대략적 처리
+        if (it.type === 'MCQ' && items.filter(x=>x.type==='MCQ').length>=3) continue;
+        if (it.type === 'OX'  && items.filter(x=>x.type==='OX').length>=2) continue;
+        if (it.type === 'SHORT' && items.filter(x=>x.type==='SHORT').length>=2) continue;
+        items.push(it);
       }
     }
-      // 3) 조회 형태로 응답(화면 VM이 바로 바인딩 가능) :contentReference[oaicite:3]{index=3}
-      const rows = await client.query(
-        `SELECT question_index, type,
-                text, options_json, correct_option_id,
-                statement, answer_is_o,
-                guide, sentence, underline_text, answer_text, explanation
-         FROM quiz_question
-         WHERE batch_id = $1
-         ORDER BY question_index`,
-        [batchId]
-      );
-       // 화면 모델에 맞춘 변환
+
+    // ★ 최후 방어: 그래도 부족하면 안전한 OX 더미로 충원
+    while (items.length < 7) {
+      items.push({
+        type: 'OX',
+        statement: '임시 문장입니다. 사실인가요?',
+        answer_is_o: false,
+        explanation: null
+      });
+    }
+
+    // 2) 항상 새 배치 생성
+    const ins = await client.query(
+      `INSERT INTO quiz_batch (user_id, category, total)
+       VALUES ($1,$2,$3) RETURNING id`,
+      [userId, categoryCode, 7]
+    );
+    const batchId = ins.rows[0].id;
+
+    // 3) 문항 일괄 삽입
+    let idx = 1;
+    for (const it of items) {
+      if (it.type === 'MCQ') {
+        await client.query(
+          `INSERT INTO quiz_question
+             (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
+           VALUES ($1,$2,'MCQ',$3,$4,$5,$6)`,
+          [batchId, idx, it.text, JSON.stringify(it.options), it.correct_option_id, it.explanation ?? null]
+        );
+      } else if (it.type === 'OX') {
+        await client.query(
+          `INSERT INTO quiz_question
+             (batch_id, question_index, type, statement, answer_is_o, explanation)
+           VALUES ($1,$2,'OX',$3,$4,$5)`,
+          [batchId, idx, it.statement, it.answer_is_o, it.explanation ?? null]
+        );
+      } else { // SHORT
+        await client.query(
+          `INSERT INTO quiz_question
+             (batch_id, question_index, type, guide, sentence, underline_text, answer_text, explanation)
+           VALUES ($1,$2,'SHORT',$3,$4,$5,$6,$7)`,
+          [batchId, idx, it.guide ?? null, it.sentence ?? null, it.underline_text ?? null, it.answer_text ?? null, it.explanation ?? null]
+        );
+      }
+      idx++;
+    }
+
+    await client.query('COMMIT');
+
+    // 4) 조회 형태로 응답(화면 VM이 바로 바인딩 가능)
+    const rows = await client.query(
+      `SELECT question_index, type,
+              text, options_json, correct_option_id,
+              statement, answer_is_o,
+              guide, sentence, underline_text, answer_text, explanation
+       FROM quiz_question
+       WHERE batch_id = $1
+       ORDER BY question_index`,
+      [batchId]
+    );
+
     const steps = rows.rows.map(r => {
       if (r.type === 'MCQ') {
         return {
@@ -1576,12 +1641,12 @@ exports.createOrGetBatch = async (req, res) => {
         return {
           index: r.question_index, type: r.type,
           guide: r.guide, sentence: r.sentence,
-          underlineText: r.underline_text,
-          answerText: r.answer_text,
+          underlineText: r.underline_text, answerText: r.answer_text,
           explanation: r.explanation
         };
       }
     });
+
     return res.json({
       success: true,
       result: {
@@ -1592,12 +1657,19 @@ exports.createOrGetBatch = async (req, res) => {
       }
     });
   } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error(e);
-    return res.status(500).json({ success:false, message:'퀴즈 생성/조회 실패' });
+    // ★ 에러 메시지 가시성 강화
+    return res.status(500).json({
+      success:false,
+      message:'퀴즈 생성/조회 실패',
+      detail: e?.message ?? null
+    });
   } finally {
     client.release();
   }
 };
+
 // GET /api/gpt/quiz/:batchId
 exports.getBatch = async (req, res) => {
   const userId = req.user?.id;
@@ -1633,7 +1705,7 @@ exports.getBatch = async (req, res) => {
     return res.json({ success:true, result:{ batchId, total: steps.length, steps }});
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ success:false, message:'세트 조회 실패' });
+    return res.status(500).json({ success:false, message:'세트 조회 실패', detail: e?.message ?? null });
   }
 };
 
@@ -1676,6 +1748,7 @@ exports.submitAndGrade = async (req, res) => {
     } else if (step.type === 'SHORT' && step.answer_text) {
       isCorrect = (norm(textAnswer) === norm(step.answer_text));
     }
+
     await client.query(
       `INSERT INTO quiz_response
          (user_id, batch_id, question_id, question_index, type,
@@ -1691,14 +1764,16 @@ exports.submitAndGrade = async (req, res) => {
          submitted_at       = now()`,
       [userId, batchId, step.id, questionIndex, step.type, selOpt, selIsO, textAnswer, isCorrect]
     );
+
     return res.json({ success:true, result:{ isCorrect } });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ success:false, message:'응답 저장/채점 실패' });
+    return res.status(500).json({ success:false, message:'응답 저장/채점 실패', detail: e?.message ?? null });
   } finally {
     client.release();
   }
 };
+
 // GET /api/gpt/summary/daily?date=YYYY-MM-DD
 exports.getDailySummary = async (req, res) => {
   const userId = req.user?.id;
@@ -1712,7 +1787,7 @@ exports.getDailySummary = async (req, res) => {
     return res.json({ success:true, result: rows.rows });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ success:false, message:'일자별 요약 조회 실패' });
+    return res.status(500).json({ success:false, message:'일자별 요약 조회 실패', detail: e?.message ?? null });
   }
 };
 
