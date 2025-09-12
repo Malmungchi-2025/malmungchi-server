@@ -1435,89 +1435,130 @@ async function generateQuizArray(prompt) {
   return tryParseJsonArray(text);
 }
 
+// ──────────────────────────────────────────────
+// Helpers: OX 판정/정답 파싱
+// ──────────────────────────────────────────────
+function isTruthyOXAnswer(a) {
+  const A = String(a ?? '').trim().toUpperCase();
+  return ['O','X','TRUE','FALSE','T','F','YES','NO','Y','N','1','0'].includes(A);
+}
+
+function toAnswerIsO(a) {
+  const A = String(a ?? '').trim().toUpperCase();
+  if (['O','TRUE','T','1','YES','Y'].includes(A)) return true;
+  if (['X','FALSE','F','0','NO','N'].includes(A)) return false;
+  return null;
+}
+
+function looksLikeOX(it) {
+  const rawType = String(it.type || '').toUpperCase();
+  const qText   = String(it.question ?? it.statement ?? '').toUpperCase();
+  const noOpts  = !(Array.isArray(it.options) && it.options.length > 0);
+
+  const typeSaysOX =
+    rawType.includes('OX') || rawType.includes('O/X') || rawType.includes('O-X');
+
+  const textSaysOX = /\(O\/X\)/.test(qText);
+
+  const answerSaysOX = noOpts && isTruthyOXAnswer(it.answer);
+
+  return typeSaysOX || textSaysOX || answerSaysOX;
+}
+
+// ──────────────────────────────────────────────
 // GPT 결과를 우리 스키마에 맞게 정규화
+//  - MCQ 3, OX 2, SHORT 2
+//  - OX 관용 판정 강화
+//  - 보기 없는 MCQ는 스킵(오판정 방지)
+// ──────────────────────────────────────────────
 function normalizeItems(rawItems) {
   const items = [];
   let mcq = 0, ox = 0, shortx = 0;
 
-  // ★ 공용 정규화 함수 (MCQ 텍스트 일치 시 대소문자/공백/NFC 무시)
-  const norm = (s) => String(s ?? '').trim().toLowerCase().normalize('NFC');
+  // MCQ 텍스트 일치 시 대소문자/공백/NFC 무시
+  const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ').normalize('NFC');
 
   for (const it of rawItems) {
     const t = String(it.type || '').toUpperCase();
+    const qText = String(it.question || it.statement || '').trim();
 
-    if (t.includes('OX')) {
+    // 1) OX: 관용적으로 먼저 잡기
+    if (looksLikeOX(it)) {
       if (ox >= 2) continue;
-      // ★ OX 정답 파싱 관용성
-      const a = String(it.answer ?? '').trim().toUpperCase();
-      let answerIsO = null;
-      if (['O','TRUE','T','1','YES','Y'].includes(a)) answerIsO = true;
-      else if (['X','FALSE','F','0','NO','N'].includes(a)) answerIsO = false;
-
       items.push({
         type: 'OX',
-        statement: String(it.question || '').trim(),
-        answer_is_o: answerIsO,
-        explanation: it.explanation ?? null
+        statement: qText,
+        answer_is_o: toAnswerIsO(it.answer),
+        explanation: it.explanation ?? null,
       });
       ox++;
-    } else if (t.includes('단답') || t.includes('SHORT')) {
+      if (items.length === 7) break;
+      continue;
+    }
+
+    // 2) SHORT
+    if (t.includes('단답') || t.includes('SHORT')) {
       if (shortx >= 2) continue;
       items.push({
         type: 'SHORT',
-        guide: '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.',
-        sentence: String(it.question || '').trim(),
+        guide: String(it.guide || '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.'),
+        sentence: qText,
         underline_text: it.underline_text ?? null,
         answer_text: String(it.answer || '').trim(),
-        explanation: it.explanation ?? null
+        explanation: it.explanation ?? null,
       });
       shortx++;
-    } else { // MCQ
-      if (mcq >= 3) continue;
-      const opts = Array.isArray(it.options) ? it.options : [];
-      const answer = String(it.answer || '').trim();
+      if (items.length === 7) break;
+      continue;
+    }
 
-      let correctId = null;
+    // 3) MCQ
+    //    - 보기 최소 2개 이상일 때만 유효
+    //    - 보기 없으면 MCQ로 취급하지 않음(앞선 OX/SHORT로 걸러지고, 아니면 스킵)
+    const opts = Array.isArray(it.options) ? it.options : [];
+    if (opts.length >= 2 && mcq < 3) {
       const mapped = opts.map((o, idx) => {
         const label = typeof o === 'string' ? o : (o?.label ?? o?.text ?? '');
         return { id: idx + 1, label: String(label) };
       });
+
+      const answer = String(it.answer || '').trim();
+      let correctId = null;
 
       // 숫자 인덱스 허용
       const asNum = Number(answer);
       if (!Number.isNaN(asNum) && asNum >= 1 && asNum <= mapped.length) {
         correctId = asNum;
       } else {
-        // 1) 완전일치
-        for (const m of mapped) {
-          if (m.label === answer) { correctId = m.id; break; }
-        }
-        // ★ 2) 정규화 일치(nfc/소문자/공백)
+        // 1) 완전 일치
+        for (const m of mapped) { if (m.label === answer) { correctId = m.id; break; } }
+        // 2) 정규화 일치
         if (correctId == null) {
           const ansN = norm(answer);
-          for (const m of mapped) {
-            if (norm(m.label) === ansN) { correctId = m.id; break; }
-          }
+          for (const m of mapped) { if (norm(m.label) === ansN) { correctId = m.id; break; } }
         }
       }
 
       items.push({
         type: 'MCQ',
-        text: String(it.question || '').trim(),
+        text: qText,
         options: mapped,
-        correct_option_id: correctId, // 없을 수도 있으므로 서버 채점 시 null 체크
-        explanation: it.explanation ?? null
+        correct_option_id: correctId, // null 가능(서버 채점 시 null 체크)
+        explanation: it.explanation ?? null,
       });
       mcq++;
+      if (items.length === 7) break;
+      continue;
     }
-    if (items.length === 7) break;
+
+    // 4) 그 외는 스킵 (더미를 여기서 만들지 않음)
   }
 
-  // ★ 운영권장: 부족 시 재호출하도록 createOrGetBatch에서 재시도. (여긴 더미 보충 제거)
-  // 정렬: 화면 진행 순서 고정: MCQ→OX→SHORT
+  // 진행 순서 고정: MCQ → OX → SHORT
   const orderScore = { 'MCQ': 1, 'OX': 2, 'SHORT': 3 };
-  items.sort((a,b) => orderScore[a.type]-orderScore[b.type]);
-  return items.slice(0,7);
+  items.sort((a, b) => orderScore[a.type] - orderScore[b.type]);
+
+  return items.slice(0, 7);
 }
 
 // POST /api/gpt/quiz
