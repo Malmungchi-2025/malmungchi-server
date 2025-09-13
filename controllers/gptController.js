@@ -1,9 +1,87 @@
 // controllers/gptController.js
 const axios = require('axios');
+const http = require('http');
+const https = require('https');
 const pool = require('../config/db');  // ✅ 공용 pool 사용
 
 // ✅ 로그인 필수 전제: app 레벨에서 requireLogin 미들웨어로 보호할 것
 //    예) app.use('/api/gpt', auth, requireLogin, gptRoutes);
+
+// axios 공통 기본값 (직접 호출 방어)
+axios.defaults.timeout = 20000;
+axios.defaults.maxBodyLength = 1024 * 1024;
+axios.defaults.httpAgent  = new http.Agent({ keepAlive: false });
+axios.defaults.httpsAgent = new https.Agent({ keepAlive: false });
+
+//2) OpenAI 네트워크 에러만 502/504로 매핑 (사고 원인만 분리)
+function replyOpenAIError(res, err, fallbackMsg = 'GPT API 오류') {
+  const httpStatus = err?.response?.status;
+  const code = err?.code;
+
+  const retryables = new Set(['ECONNRESET','ETIMEDOUT','ECONNABORTED','ENOTFOUND','EPIPE']);
+  const isRetryableNet = retryables.has(code);
+  const isOpenAIOverload = httpStatus === 429 || (httpStatus >= 500 && httpStatus < 600);
+
+  const status = isRetryableNet ? 504
+               : isOpenAIOverload ? 502
+               : 500;
+
+  logOpenAIError(err, 'OpenAI');
+  return res.status(status).json({ success:false, message: fallbackMsg });
+}
+
+
+// 0) OpenAI axios 인스턴스 (단일 진입점)
+const oa = axios.create({
+  baseURL: 'https://api.openai.com/v1',
+  headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+  timeout: 20000, // 20s 하드 타임아웃
+  // keep-alive 재사용 소켓에서 발생하는 ECONNRESET 회피 (간단모드)
+  httpAgent: new http.Agent({ keepAlive: false }),
+  httpsAgent: new https.Agent({ keepAlive: false }),
+  maxBodyLength: 1024 * 1024,
+});
+
+// 0-1) 안전 로거 (키 노출 방지)
+function logOpenAIError(err, label = 'OpenAI') {
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  // Authorization 등 민감정보는 절대 로그에 남기지 않음
+  console.error(`[${label}] status=${status || 'N/A'} msg=${data?.error?.message || err.message}`);
+}
+
+// 0-2) 재시도 유틸 (ECONNRESET/ETIMEDOUT/ECONNABORTED/429)
+const RETRYABLE_CODES = new Set(['ECONNRESET','ETIMEDOUT','ECONNABORTED','ENOTFOUND','EPIPE']);
+async function withRetry(fn, { tries = 2, baseDelay = 300, label } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (err) {
+      lastErr = err;
+      const httpStatus = err?.response?.status;
+      const code = err?.code;
+      const retryable = RETRYABLE_CODES.has(code) || httpStatus === 429 || (httpStatus >= 500 && httpStatus < 600);
+      logOpenAIError(err, label || 'OpenAI');
+      if (i === tries - 1 || !retryable) break;
+      const delay = baseDelay * (i + 1); // 300ms, 600ms …
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+// 1) 공통 호출 (Chat Completions)
+async function callChat(messages, { temperature = 0.6, max_tokens = 900, label } = {}) {
+  return withRetry(
+    () => oa.post('/chat/completions', {
+      model: 'gpt-4o-mini',
+      messages,
+      temperature,
+      max_tokens, // 응답 길이 상한
+    }),
+    { tries: 2, baseDelay: 400, label }
+  );
+}
 
 // 1) KST 기준 yyyy-mm-dd
 function getKstToday() {
@@ -255,7 +333,7 @@ exports.generateQuote = async (req, res) => {
     return res.json({ success: true, result: generatedText, studyId, level: userLevel });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: 'GPT API 오류' });
+    return replyOpenAIError(res, err, 'GPT API 오류');
   }
 };
 
@@ -384,7 +462,7 @@ exports.searchWordDefinition = async (req, res) => {
     res.json({ success: true, result });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ success: false, message: '단어 검색 실패' });
+    return replyOpenAIError(res, err, 'GPT API 오류');
   }
 };
 
@@ -1464,26 +1542,63 @@ function tryParseJsonArray(text) {
   }
 }
 
-// 모델 호출 & JSON 파싱 유틸 (axios 버전)
 async function generateQuizArray(prompt) {
-  const resp = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o-mini',           // 기존과 동일하게
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.8,
-    },
-    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+  const resp = await callChat(
+    [{ role: 'user', content: prompt }],
+    { temperature: 0.8, max_tokens: 1200, label: 'QuizArray' }
   );
-
-  let text = resp.data?.choices?.[0]?.message?.content || '[]';
-  text = text.trim()
-    .replace(/^```json/gi,'')
-    .replace(/^```/gi,'')
-    .replace(/```$/gi,'')
+  let text = (resp.data?.choices?.[0]?.message?.content || '[]').trim()
+    .replace(/^```json/gi, '')
+    .replace(/^```/gi, '')
+    .replace(/```$/gi, '')
     .trim();
 
-  return tryParseJsonArray(text);
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    const m = text.match(/\[[\s\S]*\]/);
+    if (!m) return [];
+    try { return JSON.parse(m[0]) } catch { return []; }
+  }
+}
+
+// 3) 해설 보강도 같은 경로 사용 (timeout/재시도 통일)
+async function generateExplanationForItem(it) {
+  const sys = { role: 'system', content: '너는 한국어 시험 해설 작성자다.' };
+  let user;
+
+  if (it.type === 'MCQ') {
+    const options = (it.options || []).map(o => `${o.id}. ${o.label}`).join('\n');
+    user = { role: 'user', content:
+`다음 선택형 문제의 정답 이유를 1~2문장으로 간결히 한국어로 설명해줘.
+금지: '정답:' 접두, 정답 텍스트만 반복, 코드블록.
+문항:
+${it.text}
+보기:
+${options}
+정답 번호: ${it.correct_option_id}`
+    };
+  } else if (it.type === 'OX') {
+    user = { role: 'user', content:
+`다음 진술이 ${it.answer_is_o ? '참' : '거짓'}인 이유를 1문장으로 한국어로 설명해줘.
+금지: '정답:' 접두, 코드블록.
+진술: ${it.statement}`
+    };
+  } else {
+    user = { role: 'user', content:
+`다음 문장에서 정답 단어("${it.answer_text}")가 적절한 이유를 1문장으로 한국어로 설명해줘.
+금지: '정답:' 접두, 코드블록.
+문장: ${it.sentence}`
+    };
+  }
+
+  const resp = await callChat([sys, user], { temperature: 0.2, max_tokens: 120, label: 'Explanation' });
+  const raw = resp.data?.choices?.[0]?.message?.content;
+  return sanitizeExplanation(raw, {
+    type: it.type,
+    answer: it.answer_text ?? it.answer_is_o ?? it.correct_option_id
+  });
 }
 
 // ──────────────────────────────────────────────
@@ -1715,7 +1830,7 @@ exports.createOrGetBatch = async (req, res) => {
 
     
     // 해설 비어있는 문항 보강 생성
-    items = await ensureExplanations(items);
+    //items = await ensureExplanations(items);
 
     let retries = 0;
     while (items.length < 7 && retries < 2) {
@@ -1744,6 +1859,9 @@ exports.createOrGetBatch = async (req, res) => {
           detail: `생성된 문항 수: ${items.length} (요구: 7)`
         });
       }
+
+      // ✅ 필요한 만큼만 해설 보강 (네트워크 호출 최소화)
+      items = await ensureExplanations(items);
       
 
     // 2) 항상 새 배치 생성
@@ -1836,7 +1954,8 @@ for (const it of items) {
     });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error(e);
+    logOpenAIError(e, 'QuizBatch');
+    // console.error(e);
     // ★ 에러 메시지 가시성 강화
     return res.status(500).json({
       success:false,
@@ -1882,7 +2001,8 @@ exports.getBatch = async (req, res) => {
     });
     return res.json({ success:true, result:{ batchId, total: steps.length, steps }});
   } catch (e) {
-    console.error(e);
+    // console.error(e);
+    logOpenAIError(e, 'QuizBatch');
     return res.status(500).json({ success:false, message:'세트 조회 실패', detail: e?.message ?? null });
   }
 };
@@ -1945,7 +2065,8 @@ exports.submitAndGrade = async (req, res) => {
 
     return res.json({ success:true, result:{ isCorrect } });
   } catch (e) {
-    console.error(e);
+    // console.error(e);
+    logOpenAIError(e, 'QuizBatch');
     return res.status(500).json({ success:false, message:'응답 저장/채점 실패', detail: e?.message ?? null });
   } finally {
     client.release();
@@ -1964,7 +2085,8 @@ exports.getDailySummary = async (req, res) => {
     );
     return res.json({ success:true, result: rows.rows });
   } catch (e) {
-    console.error(e);
+    // console.error(e);
+    logOpenAIError(e, 'QuizBatch');
     return res.status(500).json({ success:false, message:'일자별 요약 조회 실패', detail: e?.message ?? null });
   }
 };
