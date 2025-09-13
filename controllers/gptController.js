@@ -1020,27 +1020,27 @@ function safeJsonParse(text) {
 }
 
 // ▼ helpers 근처에 추가
-function defaultExplanationFor(item) {
-  if (!item) return '';
-  if (item.type === 'MCQ') {
-    if (Array.isArray(item.options) && item.correct_option_id) {
-      const opt = item.options.find(o => Number(o.id) === Number(item.correct_option_id));
-      return opt ? `정답: ${opt.label}` : '';
-    }
-    return '';
-  }
-  if (item.type === 'OX') {
-    if (typeof item.answer_is_o === 'boolean') {
-      return `정답: ${item.answer_is_o ? 'O' : 'X'}`;
-    }
-    return '';
-  }
-  if (item.type === 'SHORT') {
-    if (item.answer_text) return `정답: ${item.answer_text}`;
-    return '';
-  }
-  return '';
-}
+// function defaultExplanationFor(item) {
+//   if (!item) return '';
+//   if (item.type === 'MCQ') {
+//     if (Array.isArray(item.options) && item.correct_option_id) {
+//       const opt = item.options.find(o => Number(o.id) === Number(item.correct_option_id));
+//       return opt ? `정답: ${opt.label}` : '';
+//     }
+//     return '';
+//   }
+//   if (item.type === 'OX') {
+//     if (typeof item.answer_is_o === 'boolean') {
+//       return `정답: ${item.answer_is_o ? 'O' : 'X'}`;
+//     }
+//     return '';
+//   }
+//   if (item.type === 'SHORT') {
+//     if (item.answer_text) return `정답: ${item.answer_text}`;
+//     return '';
+//   }
+//   return '';
+// }
 
 /** 4지선다/스키마 검증 */
 function validateQuestions(arr) {
@@ -1407,6 +1407,12 @@ function buildPrompt({ categoryKor, len = 80 }) {
         고급 어휘 (예: ‘합의’, ‘구조’, ‘담론’, ‘성찰’) 포함
         보기는 모두 비슷해 보이지만 뉘앙스가 뚜렷이 다른 단어로 구성
 
+  설명(explanation) 규칙:
+    - '정답:'으로 시작 금지, 정답 텍스트만 반복 금지
+    - MCQ: 왜 그 보기가 정답인지(필요 시 다른 보기와의 차이 1줄)
+    - OX: 사실 여부의 근거 1문장
+    - SHORT: 바꿔 쓸 근거나 문맥상 이유 1문장
+
   추가 조건:
   1. 문제 유형은 [사지선다형] / [O,X형] / [단답형]을 섞어 구성할 것.
     - 사지선다형: 보기는 모두 그럴듯해야 하며, 정답은 1개만 명확히 존재할 것.
@@ -1416,6 +1422,28 @@ function buildPrompt({ categoryKor, len = 80 }) {
 
   **중요: JSON 배열만 출력하세요. 코드블록(\`\`\`) 없이, 설명 없이.**
   `;
+}
+
+//2) “해설 정제/검증” 유틸 추가
+function sanitizeExplanation(raw, { type, answer, options }) {
+  let s = String(raw || '').trim()
+    .replace(/^```json|^```|```$/g, '').trim();
+
+  if (!s) return '';
+
+  // '정답:' 접두 제거
+  s = s.replace(/^정답\s*[:：]?\s*/i, '').trim();
+
+  // 정답 텍스트만 반복하거나 4자 미만은 무효
+  const justAnswer =
+    s === String(answer).trim() ||
+    s.replace(/[.。!！?？]$/, '') === String(answer).trim();
+  if (justAnswer || s.length < 4) return '';
+
+  // 의미 없는 패턴들 제거
+  if (/^해설\s*[:：]?\s*$/i.test(s)) return '';
+
+  return s;
 }
 
 // ★ JSON 배열 추출 보강: 코드블록/텍스트 섞여도 [] 구간만 뽑아 파싱 시도
@@ -1523,7 +1551,8 @@ function normalizeItems(rawItems) {
         type: 'OX',
          statement: qText,
          answer_is_o: toAnswerIsO(it.answer),
-         explanation: ensureExp(it),
+         explanation: sanitizeExplanation(it.explanation, { type: 'OX', answer: it.answer })
+         //explanation: ensureExp(it),
       });
       ox++;
       if (items.length === 7) break;
@@ -1540,7 +1569,8 @@ function normalizeItems(rawItems) {
         sentence: qText,
         underline_text: it.underline_text ?? null,
         answer_text: String(it.answer || '').trim(),
-        explanation: ensureExp(it),
+        explanation: sanitizeExplanation(it.explanation, { type: 'SHORT', answer: it.answer })
+        //explanation: ensureExp(it),
       });
       shortx++;
       if (items.length === 7) break;
@@ -1574,7 +1604,8 @@ function normalizeItems(rawItems) {
         text: qText,
         options: mapped,
         correct_option_id: correctId,
-        explanation: ensureExp(it)
+        explanation: sanitizeExplanation(it.explanation, { type: 'MCQ', answer, options: mapped.map(o=>o.label) })
+        //explanation: ensureExp(it)
       };
 
       // 해설이 비어 있으면, 정규화 아이템 기준으로 기본 해설 생성
@@ -1596,6 +1627,66 @@ function normalizeItems(rawItems) {
   // items.sort((a, b) => orderScore[a.type] - orderScore[b.type]);
 
   return items.slice(0, 7);
+}
+
+
+//4) “해설이 비었으면” 즉시 보강 생성
+async function generateExplanationForItem(it) {
+  const sys = { role: 'system', content: '너는 한국어 시험 해설 작성자다.' };
+
+  let user;
+  if (it.type === 'MCQ') {
+    const options = it.options.map(o => `${o.id}. ${o.label}`).join('\n');
+    user = {
+      role: 'user',
+      content:
+`다음 선택형 문제의 정답 이유를 1~2문장으로 간결히 한국어로 설명해줘.
+금지: '정답:' 접두, 정답 텍스트만 반복, 코드블록.
+문항:
+${it.text}
+보기:
+${options}
+정답 번호: ${it.correct_option_id}`
+    };
+  } else if (it.type === 'OX') {
+    user = {
+      role: 'user',
+      content:
+`다음 진술이 ${it.answer_is_o ? '참' : '거짓'}인 이유를 1문장으로 한국어로 설명해줘.
+금지: '정답:' 접두, 코드블록.
+진술: ${it.statement}`
+    };
+  } else { // SHORT
+    user = {
+      role: 'user',
+      content:
+`다음 문장에서 정답 단어("${it.answer_text}")가 적절한 이유를 1문장으로 한국어로 설명해줘.
+금지: '정답:' 접두, 코드블록.
+문장: ${it.sentence}`
+    };
+  }
+
+  const resp = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    { model: 'gpt-4o-mini', temperature: 0.2, messages: [sys, user], max_tokens: 120 },
+    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, timeout: 12000 }
+  );
+
+  return sanitizeExplanation(resp.data?.choices?.[0]?.message?.content, {
+    type: it.type,
+    answer: it.answer_text ?? it.answer_is_o ?? it.correct_option_id
+  });
+}
+
+async function ensureExplanations(items) {
+  for (const it of items) {
+    if (!it.explanation) {
+      try {
+        it.explanation = await generateExplanationForItem(it);
+      } catch { /* 무시하고 빈 해설 유지 */ }
+    }
+  }
+  return items;
 }
 
 // POST /api/gpt/quiz
@@ -1621,6 +1712,10 @@ exports.createOrGetBatch = async (req, res) => {
 
     let raw = await generateQuizArray(prompt);
     let items = normalizeItems(raw);
+
+    
+    // 해설 비어있는 문항 보강 생성
+    items = await ensureExplanations(items);
 
     let retries = 0;
     while (items.length < 7 && retries < 2) {
