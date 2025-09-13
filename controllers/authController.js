@@ -242,10 +242,9 @@ exports.login = async (req, res) => {
 };
 
 // 5) 내 정보
-// 5) 내 정보
 exports.me = async (req, res) => {
   if (!req.user?.id) {
-    return res.status(401).json({ success:false, message:'인증 필요' });
+    return res.status(401).json({ success: false, message: '인증 필요' });
   }
 
   try {
@@ -258,7 +257,8 @@ exports.me = async (req, res) => {
         is_verified, 
         created_at, 
         level,
-        point
+        point,
+        nickname_title  -- nickname_title 필드 추가
       FROM users 
       WHERE id = $1
       LIMIT 1
@@ -267,7 +267,7 @@ exports.me = async (req, res) => {
     const user = rows[0];
 
     if (!user) {
-      return res.status(404).json({ success:false, message:'사용자를 찾을 수 없음' });
+      return res.status(404).json({ success: false, message: '사용자를 찾을 수 없음' });
     }
 
     // (선택) null 안전 처리 및 카멜케이스로 변환하고 싶다면:
@@ -280,15 +280,15 @@ exports.me = async (req, res) => {
       createdAt: user.created_at, // 필요하면 ISO로 변환 new Date(user.created_at).toISOString()
       level: user.level ?? 0,
       point: user.point ?? 0,
+      nicknameTitle: user.nickname_title ?? ''  // nickname_title 필드를 응답에 추가
     };
 
     return res.json({ success: true, result });
   } catch (e) {
     console.error('me error:', e);
-    return res.status(500).json({ success:false, message:'조회 실패' });
+    return res.status(500).json({ success: false, message: '조회 실패' });
   }
 };
-
 //최신 저장한 단어 5개 불러오는 api
 //1) 최신 저장 단어 5개 (마이페이지 상단)
 // GET /api/me/vocabulary/recent?limit=5
