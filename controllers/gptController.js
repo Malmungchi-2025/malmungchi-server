@@ -1019,6 +1019,29 @@ function safeJsonParse(text) {
   }
 }
 
+// ▼ helpers 근처에 추가
+function defaultExplanationFor(item) {
+  if (!item) return '';
+  if (item.type === 'MCQ') {
+    if (Array.isArray(item.options) && item.correct_option_id) {
+      const opt = item.options.find(o => Number(o.id) === Number(item.correct_option_id));
+      return opt ? `정답: ${opt.label}` : '';
+    }
+    return '';
+  }
+  if (item.type === 'OX') {
+    if (typeof item.answer_is_o === 'boolean') {
+      return `정답: ${item.answer_is_o ? 'O' : 'X'}`;
+    }
+    return '';
+  }
+  if (item.type === 'SHORT') {
+    if (item.answer_text) return `정답: ${item.answer_text}`;
+    return '';
+  }
+  return '';
+}
+
 /** 4지선다/스키마 검증 */
 function validateQuestions(arr) {
   if (!Array.isArray(arr) || arr.length !== 15) return false;
@@ -1471,9 +1494,16 @@ function looksLikeOX(it) {
 //  - OX 관용 판정 강화
 //  - 보기 없는 MCQ는 스킵(오판정 방지)
 // ──────────────────────────────────────────────
+// ──────────────────────────────────────────────
+// GPT 결과를 우리 스키마에 맞게 정규화
+//  - MCQ 3, OX 2, SHORT 2
+//  - 해설(explanation) 없는 문항은 제외
+// ──────────────────────────────────────────────
 function normalizeItems(rawItems) {
   const items = [];
   let mcq = 0, ox = 0, shortx = 0;
+
+  const hasExp = (it) => typeof it.explanation === 'string' && it.explanation.trim().length > 0;
 
   // MCQ 텍스트 일치 시 대소문자/공백/NFC 무시
   const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ').normalize('NFC');
@@ -1482,14 +1512,15 @@ function normalizeItems(rawItems) {
     const t = String(it.type || '').toUpperCase();
     const qText = String(it.question || it.statement || '').trim();
 
-    // 1) OX: 관용적으로 먼저 잡기
+    // 1) OX
     if (looksLikeOX(it)) {
       if (ox >= 2) continue;
+      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       items.push({
         type: 'OX',
         statement: qText,
         answer_is_o: toAnswerIsO(it.answer),
-        explanation: it.explanation ?? null,
+        explanation: it.explanation.trim(),
       });
       ox++;
       if (items.length === 7) break;
@@ -1499,13 +1530,14 @@ function normalizeItems(rawItems) {
     // 2) SHORT
     if (t.includes('단답') || t.includes('SHORT')) {
       if (shortx >= 2) continue;
+      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       items.push({
         type: 'SHORT',
         guide: String(it.guide || '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.'),
         sentence: qText,
         underline_text: it.underline_text ?? null,
         answer_text: String(it.answer || '').trim(),
-        explanation: it.explanation ?? null,
+        explanation: it.explanation.trim(),
       });
       shortx++;
       if (items.length === 7) break;
@@ -1513,10 +1545,9 @@ function normalizeItems(rawItems) {
     }
 
     // 3) MCQ
-    //    - 보기 최소 2개 이상일 때만 유효
-    //    - 보기 없으면 MCQ로 취급하지 않음(앞선 OX/SHORT로 걸러지고, 아니면 스킵)
     const opts = Array.isArray(it.options) ? it.options : [];
     if (opts.length >= 2 && mcq < 3) {
+      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       const mapped = opts.map((o, idx) => {
         const label = typeof o === 'string' ? o : (o?.label ?? o?.text ?? '');
         return { id: idx + 1, label: String(label) };
@@ -1525,14 +1556,11 @@ function normalizeItems(rawItems) {
       const answer = String(it.answer || '').trim();
       let correctId = null;
 
-      // 숫자 인덱스 허용
       const asNum = Number(answer);
       if (!Number.isNaN(asNum) && asNum >= 1 && asNum <= mapped.length) {
         correctId = asNum;
       } else {
-        // 1) 완전 일치
         for (const m of mapped) { if (m.label === answer) { correctId = m.id; break; } }
-        // 2) 정규화 일치
         if (correctId == null) {
           const ansN = norm(answer);
           for (const m of mapped) { if (norm(m.label) === ansN) { correctId = m.id; break; } }
@@ -1555,8 +1583,8 @@ function normalizeItems(rawItems) {
   }
 
   // 진행 순서 고정: MCQ → OX → SHORT
-  const orderScore = { 'MCQ': 1, 'OX': 2, 'SHORT': 3 };
-  items.sort((a, b) => orderScore[a.type] - orderScore[b.type]);
+  // const orderScore = { 'MCQ': 1, 'OX': 2, 'SHORT': 3 };
+  // items.sort((a, b) => orderScore[a.type] - orderScore[b.type]);
 
   return items.slice(0, 7);
 }
@@ -1602,15 +1630,17 @@ exports.createOrGetBatch = async (req, res) => {
       }
     }
 
-    // ★ 최후 방어: 그래도 부족하면 안전한 OX 더미로 충원
-    while (items.length < 7) {
-      items.push({
-        type: 'OX',
-        statement: '임시 문장입니다. 사실인가요?',
-        answer_is_o: false,
-        explanation: null
-      });
-    }
+  
+    // 더미 주입 금지: GPT 응답으로만 7문항을 구성
+      if (items.length !== 7) {
+        await client.query('ROLLBACK');
+        return res.status(502).json({
+          success: false,
+          message: '퀴즈 7문항 생성 실패',
+          detail: `생성된 문항 수: ${items.length} (요구: 7)`
+        });
+      }
+      
 
     // 2) 항상 새 배치 생성
     const ins = await client.query(
@@ -1622,31 +1652,33 @@ exports.createOrGetBatch = async (req, res) => {
 
     // 3) 문항 일괄 삽입
     let idx = 1;
-    for (const it of items) {
-      if (it.type === 'MCQ') {
-        await client.query(
-          `INSERT INTO quiz_question
-             (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
-           VALUES ($1,$2,'MCQ',$3,$4,$5,$6)`,
-          [batchId, idx, it.text, JSON.stringify(it.options), it.correct_option_id, it.explanation ?? null]
-        );
-      } else if (it.type === 'OX') {
-        await client.query(
-          `INSERT INTO quiz_question
-             (batch_id, question_index, type, statement, answer_is_o, explanation)
-           VALUES ($1,$2,'OX',$3,$4,$5)`,
-          [batchId, idx, it.statement, it.answer_is_o, it.explanation ?? null]
-        );
-      } else { // SHORT
-        await client.query(
-          `INSERT INTO quiz_question
-             (batch_id, question_index, type, guide, sentence, underline_text, answer_text, explanation)
-           VALUES ($1,$2,'SHORT',$3,$4,$5,$6,$7)`,
-          [batchId, idx, it.guide ?? null, it.sentence ?? null, it.underline_text ?? null, it.answer_text ?? null, it.explanation ?? null]
-        );
-      }
-      idx++;
-    }
+for (const it of items) {
+  //const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
+
+  if (it.type === 'MCQ') {
+    await client.query(
+      `INSERT INTO quiz_question
+         (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
+       VALUES ($1,$2,'MCQ',$3,$4,$5,$6)`,
+      [batchId, idx, it.text, JSON.stringify(it.options), it.correct_option_id, exp]
+    );
+  } else if (it.type === 'OX') {
+    await client.query(
+      `INSERT INTO quiz_question
+         (batch_id, question_index, type, statement, answer_is_o, explanation)
+       VALUES ($1,$2,'OX',$3,$4,$5)`,
+      [batchId, idx, it.statement, it.answer_is_o, exp]
+    );
+  } else { // SHORT
+    await client.query(
+      `INSERT INTO quiz_question
+         (batch_id, question_index, type, guide, sentence, underline_text, answer_text, explanation)
+       VALUES ($1,$2,'SHORT',$3,$4,$5,$6,$7)`,
+      [batchId, idx, it.guide ?? null, it.sentence ?? null, it.underline_text ?? null, it.answer_text ?? null, exp]
+    );
+  }
+  idx++;
+}
 
     await client.query('COMMIT');
 
