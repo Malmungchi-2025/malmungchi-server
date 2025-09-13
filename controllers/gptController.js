@@ -1503,8 +1503,11 @@ function normalizeItems(rawItems) {
   const items = [];
   let mcq = 0, ox = 0, shortx = 0;
 
-  const hasExp = (it) => typeof it.explanation === 'string' && it.explanation.trim().length > 0;
-
+  //const hasExp = (it) => typeof it.explanation === 'string' && it.explanation.trim().length > 0;
+ const ensureExp = (it) => {
+    const exp = (it.explanation ?? defaultExplanationFor(it) ?? '').toString();
+    return exp;
+ };
   // MCQ 텍스트 일치 시 대소문자/공백/NFC 무시
   const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ').normalize('NFC');
 
@@ -1515,12 +1518,12 @@ function normalizeItems(rawItems) {
     // 1) OX
     if (looksLikeOX(it)) {
       if (ox >= 2) continue;
-      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
+      // if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       items.push({
         type: 'OX',
-        statement: qText,
-        answer_is_o: toAnswerIsO(it.answer),
-        explanation: it.explanation.trim(),
+         statement: qText,
+         answer_is_o: toAnswerIsO(it.answer),
+         explanation: ensureExp(it),
       });
       ox++;
       if (items.length === 7) break;
@@ -1530,14 +1533,14 @@ function normalizeItems(rawItems) {
     // 2) SHORT
     if (t.includes('단답') || t.includes('SHORT')) {
       if (shortx >= 2) continue;
-      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
+      //if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       items.push({
         type: 'SHORT',
         guide: String(it.guide || '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.'),
         sentence: qText,
         underline_text: it.underline_text ?? null,
         answer_text: String(it.answer || '').trim(),
-        explanation: it.explanation.trim(),
+        explanation: ensureExp(it),
       });
       shortx++;
       if (items.length === 7) break;
@@ -1547,7 +1550,6 @@ function normalizeItems(rawItems) {
     // 3) MCQ
     const opts = Array.isArray(it.options) ? it.options : [];
     if (opts.length >= 2 && mcq < 3) {
-      if (!hasExp(it)) continue; // ✨ 해설 없으면 스킵
       const mapped = opts.map((o, idx) => {
         const label = typeof o === 'string' ? o : (o?.label ?? o?.text ?? '');
         return { id: idx + 1, label: String(label) };
@@ -1567,13 +1569,20 @@ function normalizeItems(rawItems) {
         }
       }
 
-      items.push({
+      const mcqItem = {
         type: 'MCQ',
         text: qText,
         options: mapped,
-        correct_option_id: correctId, // null 가능(서버 채점 시 null 체크)
-        explanation: it.explanation ?? null,
-      });
+        correct_option_id: correctId,
+        explanation: ensureExp(it)
+      };
+
+      // 해설이 비어 있으면, 정규화 아이템 기준으로 기본 해설 생성
+      if (!mcqItem.explanation) {
+        mcqItem.explanation = defaultExplanationFor(mcqItem);
+      }
+
+      items.push(mcqItem);
       mcq++;
       if (items.length === 7) break;
       continue;
@@ -1653,7 +1662,7 @@ exports.createOrGetBatch = async (req, res) => {
     // 3) 문항 일괄 삽입
     let idx = 1;
 for (const it of items) {
-  //const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
+  const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
 
   if (it.type === 'MCQ') {
     await client.query(
