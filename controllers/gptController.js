@@ -1532,10 +1532,10 @@ function normalizeItems(rawItems) {
   let mcq = 0, ox = 0, shortx = 0;
 
   //const hasExp = (it) => typeof it.explanation === 'string' && it.explanation.trim().length > 0;
- const ensureExp = (it) => {
-    const exp = (it.explanation ?? defaultExplanationFor(it) ?? '').toString();
-    return exp;
- };
+//  const ensureExp = (it) => {
+//     const exp = (it.explanation ?? defaultExplanationFor(it) ?? '').toString();
+//     return exp;
+//  };
   // MCQ 텍스트 일치 시 대소문자/공백/NFC 무시
   const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ').normalize('NFC');
 
@@ -1608,10 +1608,10 @@ function normalizeItems(rawItems) {
         //explanation: ensureExp(it)
       };
 
-      // 해설이 비어 있으면, 정규화 아이템 기준으로 기본 해설 생성
-      if (!mcqItem.explanation) {
-        mcqItem.explanation = defaultExplanationFor(mcqItem);
-      }
+      // // 해설이 비어 있으면, 정규화 아이템 기준으로 기본 해설 생성
+      // if (!mcqItem.explanation) {
+      //   mcqItem.explanation = defaultExplanationFor(mcqItem);
+      // }
 
       items.push(mcqItem);
       mcq++;
@@ -1757,7 +1757,7 @@ exports.createOrGetBatch = async (req, res) => {
     // 3) 문항 일괄 삽입
     let idx = 1;
 for (const it of items) {
-  const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
+  // const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
 
   if (it.type === 'MCQ') {
     await client.query(
