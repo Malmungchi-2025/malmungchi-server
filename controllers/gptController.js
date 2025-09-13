@@ -1758,20 +1758,21 @@ exports.createOrGetBatch = async (req, res) => {
     let idx = 1;
 for (const it of items) {
   // const exp = String(it.explanation ?? defaultExplanationFor(it) ?? '');
+   const exp = String(it.explanation ?? '').trim();
 
   if (it.type === 'MCQ') {
     await client.query(
       `INSERT INTO quiz_question
-         (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
-       VALUES ($1,$2,'MCQ',$3,$4,$5,$6)`,
-      [batchId, idx, it.text, JSON.stringify(it.options), it.correct_option_id, exp]
+          (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
+        VALUES ($1,$2,'MCQ',$3,$4::jsonb,$5,$6)`,
+      [batchId, idx, it.text, JSON.stringify(it.options || []), it.correct_option_id ?? null, exp]
     );
   } else if (it.type === 'OX') {
     await client.query(
       `INSERT INTO quiz_question
          (batch_id, question_index, type, statement, answer_is_o, explanation)
        VALUES ($1,$2,'OX',$3,$4,$5)`,
-      [batchId, idx, it.statement, it.answer_is_o, exp]
+      [batchId, idx, it.statement, (it.answer_is_o ?? null), exp]
     );
   } else { // SHORT
     await client.query(
