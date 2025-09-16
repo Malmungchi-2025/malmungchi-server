@@ -1,5 +1,3 @@
-controllers/voiceController.js
-
 // controllers/voiceController.js
 const axios = require('axios');
 const FormData = require('form-data');
