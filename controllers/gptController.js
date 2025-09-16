@@ -2057,7 +2057,7 @@ exports.getDailySummary = async (req, res) => {
 
 // POST /api/gpt/quiz/attempt/reward
 // 시도 1건 보상 지급: 기본 15p + 전부 정답이면 +5p
-export const giveQuizAttemptPoint = async (req, res) => {
+exports.giveQuizAttemptPoint = async (req, res) =>  {
   const client = await pool.connect();
   try {
     const userId = req.user?.id;

@@ -626,5 +626,31 @@ router.post('/level-test/generate', gptController.generateLevelTest);
  */
 router.post('/level-test/submit', gptController.submitLevelTest);
 
+/**
+ * @swagger
+ * /api/gpt/quiz/attempt/reward:
+ *   post:
+ *     summary: 퀴즈 시도 1건 보상 지급 (기본 15p, 전부 정답이면 +5p)
+ *     tags: [Quiz]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [attemptId]
+ *             properties:
+ *               attemptId: { type: integer, example: 123 }
+ *     responses:
+ *       200: { description: 지급 성공 }
+ *       400: { description: 이미 지급됨/요청 오류 }
+ *       401: { description: 인증 필요 }
+ *       403: { description: 본인 시도 아님 }
+ *       404: { description: 시도를 찾을 수 없음 }
+ */
+router.post('/quiz/attempt/reward', gptController.giveQuizAttemptPoint);
+
 module.exports = router;
 
