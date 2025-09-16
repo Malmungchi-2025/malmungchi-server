@@ -13,6 +13,13 @@ const pool = require('./config/db');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+//요청 타임아웃(여유) -> 챗봇
+app.use((req, res, next) => {
+  req.setTimeout(120000);  // 120초
+  res.setTimeout(120000);
+  next();
+});
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 app.get('/', (req, res) => res.send('🚀 Malmungchi Server is running...'));
@@ -22,6 +29,9 @@ app.use('/api/auth', authDevRoutes);
 
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
+
+const voiceRoutes = require('./routes/voiceRoutes');
+app.use('/api/voice', voiceRoutes); // 최소 구성
 
 const gptRoutes = require('./routes/gptRoutes');
 app.use('/api/gpt', gptRoutes);
