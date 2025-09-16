@@ -4,7 +4,8 @@ const FormData = require('form-data');
 const textToSpeech = require('@google-cloud/text-to-speech');
 const http  = require('http');
 const https = require('https');
-const { getPrompt, COMMON, JOB, WORK, DAILY } = require('../prompts');
+const { getPrompt, COMMON, JOB, WORK, DAILY } = require('../server/prompts');
+//const { getPrompt, COMMON, JOB, WORK, DAILY } = require('../prompts');
 
 const OA_BASE = 'https://api.openai.com/v1';
 const OA_KEY  = process.env.OPENAI_API_KEY;
