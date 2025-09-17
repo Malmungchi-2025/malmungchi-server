@@ -1,4 +1,4 @@
-// const express = require('express');
+const express = require('express');
 const multer  = require('multer');
 
 // 🔻 명시적으로 메모리 스토리지
