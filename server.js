@@ -3,6 +3,26 @@ const dotenv = require('dotenv');
 dotenv.config(); // ✅ 최상단에서 가장 먼저 실행
 const fs = require('fs');
 const path = require('path');
+
+// ✅ Google TTS Base64 → JSON 복원
+(function restoreGoogleKeyFromEnv() {
+  const b64 = process.env.GOOGLE_TTS_JSON_BASE64;
+  if (!b64) {
+    console.log('[TTS] GOOGLE_TTS_JSON_BASE64 not set. Skip decode.');
+    return;
+  }
+  const credPath = '/opt/render/project/.data/gcp-tts.json';
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    fs.writeFileSync(credPath, buf, { mode: 0o600 });
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+    console.log('[TTS] Credentials restored at', credPath);
+  } catch (e) {
+    console.error('[TTS] Decode failed:', e.message);
+  }
+})();
+
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
