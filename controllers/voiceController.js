@@ -407,10 +407,10 @@ critique에는 무엇이 문제였는지 한 줄로 요약.
 
 // (취준생 전용) 스타터(상황+질문)
 const JOB_STARTERS = [
-  "[면접 상황]\n: 본인의 장단점이 무엇인가요?",
-  "[자기소개서]\n: 우리 회사 지원 동기를 3~4문장으로 초안 작성해볼까요?",
-  "[전화 응대]\n: 면접 일정 조율 전화를 받았을 때, 첫 인사와 핵심 질문을 말로 해보세요.",
-  "[불합격 대응]\n: 불합격 메일을 받았을 때, 스스로를 다독이는 2문장 메시지를 작성해보세요."
+  { situation: '면접 상황',   question: '본인의 장단점이 무엇인가요?' },
+  { situation: '자기소개서', question: '우리 회사 지원 동기를 3~4문장으로 초안 작성해볼까요?' },
+  { situation: '전화 응대',   question: '면접 일정 조율 전화를 받았을 때, 첫 인사와 핵심 질문을 말로 해보세요.' },
+  { situation: '불합격 대응', question: '불합격 메일을 받았을 때, 스스로를 다독이는 2문장 메시지를 작성해보세요.' },
 ];
 
 function pickJobStarter() {
@@ -468,28 +468,38 @@ exports.getVoicePrompt = async (_req, res) => {
  * ========================================================= */
 exports.voiceHello = async (req, res) => {
   try {
-    const mode = 'job';                          // 🔒 강제
-    const text = pickJobStarter();               // ✅ 항상 [상황+질문] 형식
+    const mode = 'job';
+    const starter = pickJobStarter(); // { situation, question }
 
+    // 화면표시용 전체 문장(=TTS용)
+    const fullText = `[${starter.situation}]\n: ${starter.question}`;
+
+    // TTS
     const [ttsResp] = await ttsClient.synthesizeSpeech({
-      input: { text },
+      input: { text: fullText },
       voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
       audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
     });
     const mp3Buffer = Buffer.from(ttsResp.audioContent);
 
-    if (req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg')) {
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Length', mp3Buffer.length);
-      return res.end(mp3Buffer);
+    // JSON으로 돌려줄 때: 상황/질문/전체문장/오디오 모두 포함
+    if (!(req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg'))) {
+      return res.json({
+        success: true,
+        mode,
+        situation: starter.situation,     // ✅ 프론트: 태그(칩/작은 말풍선)
+        question:  starter.question,      // ✅ 프론트: 큰 말풍선(회색)
+        text:      fullText,              // (필요하면 사용)
+        audioBase64: mp3Buffer.toString('base64'),
+        mimeType: 'audio/mpeg'
+      });
     }
-    return res.json({
-      success: true,
-      mode,
-      text, // 예: "[면접 상황]\n: 본인의 장단점이 무엇인가요?"
-      audioBase64: mp3Buffer.toString('base64'),
-      mimeType: 'audio/mpeg'
-    });
+
+    // 스트리밍으로 달라고 하면 오디오만
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', mp3Buffer.length);
+    return res.end(mp3Buffer);
+
   } catch (err) {
     logTtsError('voiceHello', err);
     return res.status(500).json({ success:false, message:'voiceHello 실패', hint: err?.message });
