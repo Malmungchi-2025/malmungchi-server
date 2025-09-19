@@ -2188,5 +2188,134 @@ exports.giveQuizAttemptPoint = async (req, res) =>  {
   }
 };
 
+/**
+ * POST /api/gpt/ai-chat/touch-today
+ * - 오늘 최초 호출 시 today_ai_chat upsert (first_chat_at 기록)
+ * - 보상과 무관, 단순 존재 마킹용
+ */
+exports.touchTodayAiChat = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const today = getKstToday();
+    await pool.query(
+      `INSERT INTO public.today_ai_chat (user_id, date, first_chat_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id, date)
+       DO UPDATE SET first_chat_at = COALESCE(public.today_ai_chat.first_chat_at, EXCLUDED.first_chat_at)`,
+      [userId, today]
+    );
+    return res.json({ success:true, message:'오늘 AI 채팅 기록됨' });
+  } catch (e) {
+    console.error('touchTodayAiChat error:', e?.message || e);
+    return res.status(500).json({ success:false, message:'기록 실패' });
+  }
+};
+
+/**
+ * POST /api/gpt/ai-chat/complete-reward
+ * - ✅ user_id 필수
+ * - ✅ 하루 1회만 지급 (user_id+date 유니크)
+ * - ✅ today_ai_chat 테이블 기반
+ * - ✅ 선택: ?autoTouch=1 이면 행 없을 때 자동 생성
+ * 응답: { success, message, todayReward, totalPoint }
+ */
+exports.giveAiChatDailyReward = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const today = getKstToday();
+    const POINT = 15;
+    const autoTouch = req.query.autoTouch === '1'; // ← 프론트에서 편하게 쓰고 싶으면 ?autoTouch=1
+
+    await client.query('BEGIN');
+
+    // (A) 동시성 제어: 유저+일자 기준 advisory tx lock
+    const todayKey = Number(today.replaceAll('-', '')); // YYYYMMDD -> int
+    await client.query('SELECT pg_advisory_xact_lock($1, $2)', [Number(userId), todayKey]);
+
+    // (B) 오늘 행 잠금 조회
+    let check = await client.query(
+      `SELECT rewarded_date
+         FROM public.today_ai_chat
+        WHERE user_id = $1 AND date = $2
+        FOR UPDATE`,
+      [userId, today]
+    );
+
+    // (옵션) 없으면 자동 생성
+    if (check.rowCount === 0 && autoTouch) {
+      await client.query(
+        `INSERT INTO public.today_ai_chat (user_id, date, first_chat_at)
+         VALUES ($1, $2, now())`,
+        [userId, today]
+      );
+      check = await client.query(
+        `SELECT rewarded_date
+           FROM public.today_ai_chat
+          WHERE user_id = $1 AND date = $2
+          FOR UPDATE`,
+        [userId, today]
+      );
+    }
+
+    if (check.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success:false, message:'오늘 AI 채팅 내역이 없습니다.' });
+    }
+
+    const rewardedDate = check.rows[0].rewarded_date;
+    const alreadyRewarded = rewardedDate && String(rewardedDate) === today;
+    if (alreadyRewarded) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success:false, message:'이미 포인트가 지급되었습니다.' });
+    }
+
+    // (C) 포인트 적립
+    const upd = await client.query(
+      `UPDATE public.users
+          SET point = COALESCE(point, 0) + $2,
+              updated_at = now()
+        WHERE id = $1
+        RETURNING point`,
+      [userId, POINT]
+    );
+
+    // (D) 보상 마킹
+    await client.query(
+      `UPDATE public.today_ai_chat
+          SET rewarded_date = $3
+        WHERE user_id = $1 AND date = $2`,
+      [userId, today, today]
+    );
+
+    // (E) (선택) 포인트 이력 남기기
+    try {
+      await client.query(
+        `INSERT INTO public.point_history(user_id, delta, reason, ref_id, created_at)
+         VALUES ($1, $2, $3, $4, now())`,
+        [userId, POINT, 'ai_chat_daily', null]
+      );
+    } catch (_) { /* 이력 실패는 치명 아님 */ }
+
+    await client.query('COMMIT');
+
+    return res.json({
+      success: true,
+      message: '포인트가 지급되었습니다.',
+      todayReward: POINT,
+      totalPoint: upd.rows[0]?.point ?? 0
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ AI 채팅 보상 오류:', err);
+    return res.status(500).json({ success:false, message:'포인트 지급 실패' });
+  } finally {
+    client.release();
+  }
+};
 
 

@@ -652,5 +652,46 @@ router.post('/level-test/submit', gptController.submitLevelTest);
  */
 router.post('/quiz/attempt/reward', gptController.giveQuizAttemptPoint);
 
+/**
+ * @swagger
+ * /api/gpt/ai-chat/touch-today:
+ *   post:
+ *     summary: 오늘 AI 채팅 기록(존재 마킹)
+ *     tags: [AI Chat]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200: { description: 오늘 AI 채팅 기록 성공 }
+ *       400: { description: 요청 오류 }
+ *       401: { description: 인증 필요 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/gpt/ai-chat/touch-today', gptController.touchTodayAiChat);
+
+/**
+ * @swagger
+ * /api/gpt/ai-chat/complete-reward:
+ *   post:
+ *     summary: AI 채팅 완료 보상 지급 (하루 1회, 15p)
+ *     tags: [AI Chat]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: autoTouch
+ *         schema:
+ *           type: string
+ *           enum: [0, 1]
+ *         required: false
+ *         description: "1로 주면 today_ai_chat 행 없을 때 자동 생성"
+ *     responses:
+ *       200: { description: 지급 성공 }
+ *       400: { description: 이미 지급됨/채팅 내역 없음 }
+ *       401: { description: 인증 필요 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/gpt/ai-chat/complete-reward', gptController.giveAiChatDailyReward);
+
+
 module.exports = router;
 
