@@ -113,6 +113,11 @@ function generateNumericOtp(digits = 6) {
   return n.toString().padStart(digits, '0');
 }
 
+
+// 회원가입(register) 함수 안, 토큰 생성 이후에 추가:
+const otp = generateNumericOtp(6);
+console.log(`[DEBUG][EMAIL_OTP] ${email} → ${otp}`);
+
 // 2) 이메일 인증
 exports.verifyEmail = async (req, res) => {
   const { token } = req.query;
