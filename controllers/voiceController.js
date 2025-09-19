@@ -128,16 +128,19 @@
 // controllers/voiceController.js
 const axios = require('axios');
 const FormData = require('form-data');
-const textToSpeech = require('@google-cloud/text-to-speech');
 const http  = require('http');
 const https = require('https');
 const { getPrompt, COMMON, JOB, WORK, DAILY } = require('../server/prompts');
+const { ttsClient, meta: ttsMeta } = require('../services/ttsClient');
 
 const OA_BASE    = 'https://api.openai.com/v1';
 const OA_KEY     = process.env.OPENAI_API_KEY;
 const STT_MODEL  = process.env.STT_MODEL  || 'gpt-4o-mini-transcribe'; // 실패 시 whisper-1 폴백
 const GPT_MODEL  = process.env.GPT_MODEL  || 'gpt-4o-mini';
-const gttsClient = new textToSpeech.TextToSpeechClient();
+
+if (!OA_KEY) {
+  console.warn('[OpenAI] OPENAI_API_KEY 미설정: STT/GPT 호출 시 401 발생 가능');
+}
 
 const oa = axios.create({
   baseURL: OA_BASE,
@@ -165,6 +168,21 @@ exports.getVoicePrompt = async (req, res) => {
   }
 };
 
+// 공통: 에러 디버깅 헬퍼(민감정보 제외)
+function logTtsError(tag, err) {
+  const msg = err?.message || err;
+  const code = err?.code;
+  const details = err?.details || err?.response?.data;
+  console.error(`[${tag}] TTS error:`, { msg, code, details, ttsProject: ttsMeta?.projectId, ttsEmail: ttsMeta?.clientEmailMasked });
+}
+
+function logOpenAiError(tag, err) {
+  const msg = err?.message || err;
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  console.error(`[${tag}] OpenAI error:`, { msg, status, data });
+}
+
 // ─────────────────────────────────────────────────────────
 // GET /api/voice/hello?mode=job|work|daily&as=stream
 // 서버가 먼저 상황+질문을 음성(TTS)+텍스트로 제공
@@ -185,7 +203,7 @@ exports.voiceHello = async (req, res) => {
     }
 
     // TTS (Google Cloud → MP3)
-    const [ttsResp] = await gttsClient.synthesizeSpeech({
+    const [ttsResp] = await ttsClient.synthesizeSpeech({
       input: { text },
       voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
       audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
@@ -206,8 +224,8 @@ exports.voiceHello = async (req, res) => {
       mimeType: 'audio/mpeg'
     });
   } catch (err) {
-    console.error('voiceHello error:', err?.response?.data || err?.message || err);
-    return res.status(500).json({ success:false, message:'voiceHello 실패' });
+    logTtsError('voiceHello', err);
+    return res.status(500).json({ success:false, message:'voiceHello 실패', hint: err?.message });
   }
 };
 
@@ -230,12 +248,17 @@ exports.voiceChat = async (req, res) => {
       const sttResp = await oa.post('/audio/transcriptions', fd, { headers: fd.getHeaders() });
       sttText = (sttResp.data?.text || '').trim();
     } catch (sttErr) {
-      console.warn('STT primary failed, fallback whisper-1:', sttErr?.response?.data || sttErr?.message);
-      const fd2 = new FormData();
-      fd2.append('file', req.file.buffer, { filename: req.file.originalname || 'audio.m4a' });
-      fd2.append('model', 'whisper-1');
-      const sttResp2 = await oa.post('/audio/transcriptions', fd2, { headers: fd2.getHeaders() });
-      sttText = (sttResp2.data?.text || '').trim();
+      logOpenAiError('STT-primary', sttErr);
+      try {
+        const fd2 = new FormData();
+        fd2.append('file', req.file.buffer, { filename: req.file.originalname || 'audio.m4a' });
+        fd2.append('model', 'whisper-1');
+        const sttResp2 = await oa.post('/audio/transcriptions', fd2, { headers: fd2.getHeaders() });
+        sttText = (sttResp2.data?.text || '').trim();
+      } catch (sttErr2) {
+        logOpenAiError('STT-fallback', sttErr2);
+        return res.status(502).json({ success:false, message:'STT 실패', hint: sttErr2?.message });
+      }
     }
 
     if (!sttText) {
@@ -250,28 +273,40 @@ exports.voiceChat = async (req, res) => {
 
     const temperature  = Number(req.body?.temperature ?? 0.6);
 
-    const gpt = await oa.post('/chat/completions', {
-      model: GPT_MODEL,
-      messages: [
-        { role:'system', content: systemPrompt },
-        { role:'user',   content: sttText }
-      ],
-      temperature,
-      max_tokens: 400
-    });
+    let botText = '';
+    try {
+      const gpt = await oa.post('/chat/completions', {
+        model: GPT_MODEL,
+        messages: [
+          { role:'system', content: systemPrompt },
+          { role:'user',   content: sttText }
+        ],
+        temperature,
+        max_tokens: 400
+      });
+      botText = (gpt.data?.choices?.[0]?.message?.content || '').trim();
+    } catch (gptErr) {
+      logOpenAiError('GPT', gptErr);
+      return res.status(502).json({ success:false, message:'GPT 호출 실패', hint: gptErr?.message });
+    }
 
-    const botText = (gpt.data?.choices?.[0]?.message?.content || '').trim();
     if (!botText) {
       return res.status(500).json({ success:false, message:'GPT 응답이 비었습니다.' });
     }
 
     // 3) TTS (Google → MP3)
-    const [ttsResp] = await gttsClient.synthesizeSpeech({
-      input: { text: botText },
-      voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
-    });
-    const mp3Buffer = Buffer.from(ttsResp.audioContent);
+    let mp3Buffer;
+    try {
+      const [ttsResp] = await ttsClient.synthesizeSpeech({
+        input: { text: botText },
+        voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
+      });
+      mp3Buffer = Buffer.from(ttsResp.audioContent);
+    } catch (ttsErr) {
+      logTtsError('voiceChat', ttsErr);
+      return res.status(502).json({ success:false, message:'TTS 실패', hint: ttsErr?.message });
+    }
 
     // 바이너리 스트리밍 or JSON(+base64)
     if (req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg')) {
@@ -290,8 +325,7 @@ exports.voiceChat = async (req, res) => {
       hint: '다시 한 번 해볼까요?'
     });
   } catch (err) {
-    // 디버깅이 편하도록 상세 로그
-    console.error('voiceChat error:', err?.response?.data || err?.message || err);
-    return res.status(500).json({ success:false, message:'voiceChat 실패' });
+    console.error('voiceChat error (top):', err?.message || err);
+    return res.status(500).json({ success:false, message:'voiceChat 실패', hint: err?.message });
   }
 };

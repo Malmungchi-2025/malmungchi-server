@@ -171,7 +171,6 @@ const upload  = multer({
 });
 
 const { voiceChat, getVoicePrompt, voiceHello } = require('../controllers/voiceController');
-
 const router = express.Router();
 
 /**
@@ -182,39 +181,6 @@ const router = express.Router();
  */
 
 router.get('/prompts', getVoicePrompt);
-
-/**
- * @swagger
- * /api/voice/hello:
- *   get:
- *     summary: 서버가 먼저 상황+질문을 음성과 텍스트로 전달
- *     tags: [Voice]
- *     parameters:
- *       - in: query
- *         name: mode
- *         schema: { type: string, enum: [job, work, daily], default: job }
- *       - in: query
- *         name: as
- *         schema: { type: string, enum: [stream] }
- *         description: audio/mpeg 스트리밍으로 받고 싶으면 ?as=stream 또는 Accept: audio/mpeg
- *     responses:
- *       200:
- *         description: 성공
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean }
- *                 mode: { type: string }
- *                 text: { type: string }
- *                 audioBase64: { type: string }
- *                 mimeType: { type: string }
- *           audio/mpeg:
- *             schema:
- *               type: string
- *               format: binary
- */
 router.get('/hello', voiceHello);
 
 /**
@@ -244,12 +210,9 @@ router.get('/hello', voiceHello);
  *                 type: number
  *                 default: 0.6
  *     responses:
- *       200:
- *         description: 성공
- *       400:
- *         description: 잘못된 요청
- *       500:
- *         description: 서버 오류
+ *       200: { description: 성공 }
+ *       400: { description: 잘못된 요청 }
+ *       500: { description: 서버 오류 }
  */
 router.post('/chat', upload.single('audio'), voiceChat);
 
