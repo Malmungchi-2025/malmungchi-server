@@ -76,6 +76,10 @@ exports.register = async (req, res) => {
     const otp = generateNumericOtp(6);
     console.log(`[DEBUG][EMAIL_OTP] ${user.email} → ${otp}`);
 
+    // (선택) 인증 링크도 로그로 보고 싶으면
+    const link = `${process.env.APP_BASE_URL}/api/auth/verify-email?token=${token}`;
+    console.log('[DEBUG][VERIFY_LINK][REGISTER]', link);
+
     // 2) 그 다음 메일 발송 (실패해도 가입은 성공) - throw 방지
     let mailed = true;
     try {
@@ -179,6 +183,14 @@ exports.resendVerification = async (req, res) => {
        ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
       [u.rows[0].id, token, expiresAt]
     );
+
+    // ✅ 여기 추가: OTP 생성 + 로그 (메일 본문엔 넣지 않아도 됨)
+    const otp = generateNumericOtp(6);
+    console.log(`[DEBUG][EMAIL_OTP] ${email} → ${otp}`);
+
+    // (선택) 인증 링크 로그
+    const link = `${process.env.APP_BASE_URL}/api/auth/verify-email?token=${token}`;
+    console.log('[DEBUG][VERIFY_LINK][RESEND]', link);
 
     let mailed = true;
     try {
