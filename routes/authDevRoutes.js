@@ -34,6 +34,9 @@ router.post('/dev/request-otp', async (req, res) => {
     const minutes = Math.floor(EXPIRES_SEC / 60) || 1;
     const displayName = name || ''; // 없으면 빈 문자열
 
+    //otp 번호 로그 찍기
+    console.log(`[DEV][OTP][REQUEST] ${key} -> ${code} (ttl=${EXPIRES_SEC}s)`);
+
     // ✅ 템플릿 적용
     const html = renderOtpHtml(displayName, code, minutes);
     const text = renderOtpPlain(displayName, code, minutes);
@@ -44,6 +47,9 @@ router.post('/dev/request-otp', async (req, res) => {
       html,
       text,
     });
+
+    //otp 번호 발송 결과
+    console.log(`[DEV][OTP][MAIL] to=${key} mailed=${mailed}`);
 
     return res.status(mailed ? 200 : 202).json({
       success: true,
