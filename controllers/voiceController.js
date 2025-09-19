@@ -282,3 +282,228 @@ exports.voiceChat = async (req, res) => {
     return res.status(500).json({ success:false, message:'voiceChat 실패', hint: err?.message });
   }
 };
+
+/* =========================================================
+ * (일상 대화) 프롬프트/스타터/평가 규칙
+ * ========================================================= */
+
+// 출력 스키마는 기존 OUTPUT_SCHEMA 재사용
+
+// 공통 운영 기준(COMMON_RULES)도 그대로 재사용
+
+// 일상 대화 가이드
+const DAILY_GUIDE = `
+[일상대화]
+너는 사회초년생을 위한 일상 대화 파트너야.
+사용자가 하루의 일과를 나누거나, 스트레스, 고민, 루틴, 인간관계, 감정 등을 편하게 털어놓을 수 있도록 대화를 이끌어줘.
+
+조건:
+1. 대화는 친구처럼 다정하고 편안한 톤으로 시작해줘.
+2. 먼저 자연스럽게 말을 걸고, 사용자의 오늘 하루나 요즘 상태에 관심을 가져줘.
+3. 사용자가 털어놓는 이야기에 공감하고, 부드럽게 질문을 이어가거나 대답해줘.
+4. 필요할 땐 팁이나 추천(예: 루틴, 스트레스 해소법 등)을 제시해도 좋아.
+5. 과도하게 상담하지 않고, 가벼운 대화부터 깊이 있는 고민까지 자연스럽게 받아줘.
+6. 사용자의 단어 선택이 올바르지 않다면, ‘다시 말해보세요.’라는 말과 함께 팁을 제공해줘.
+`;
+
+// 평가 기준(needRetry 판정) — 기존과 유사하되 일상 톤/맥락 반영
+const DAILY_EVAL_RUBRIC = `
+[평가 기준(필수)]
+다음 중 하나라도 해당하면 needRetry=true로 평가하고, reply는 "다시 한 번 해볼까요?"로 시작:
+- 답변이 과도하게 짧거나 막연함(대화 진전이 어려움)
+- 문맥과 맞지 않는 단어 선택/비속어 등으로 톤이 부적절함
+- 문법/어휘 오류가 의미 이해를 방해
+- 개인정보를 과도하게 요구/제공하려는 시도
+- 모호해서 추가 정보 없이는 이어가기 어려운 경우
+
+needRetry=true일 때 tip에는 "어떻게 말하면 되는지"를 1~2문장으로 간결히 제시.
+critique에는 무엇이 문제였는지 한 줄로 요약.
+`;
+
+// 일상 대화 스타터 (인사+라이트 톤)
+const DAILY_STARTERS = [
+  { situation: '일상 대화', question: '오늘 하루는 어땠나요? 편하게 이야기 나눠봐요 :)' },
+  { situation: '일상 대화', question: '요즘 잠은 잘 오세요? 퇴근 후 루틴이 궁금해요.' },
+  { situation: '일상 대화', question: '최근에 기뻤던 일 하나만 꼽는다면 뭐가 있을까요?' },
+  { situation: '일상 대화', question: '스트레스 풀 때 주로 뭐 하세요? 같이 루틴을 잡아봐도 좋아요.' },
+];
+
+function pickDailyStarter() {
+  return DAILY_STARTERS[Math.floor(Math.random() * DAILY_STARTERS.length)];
+}
+
+// 모드별 시스템 프롬프트 구성
+function getDailyPrompt() {
+  return `
+${COMMON_RULES}
+
+${DAILY_GUIDE}
+
+${DAILY_EVAL_RUBRIC}
+
+${OUTPUT_SCHEMA}
+`.trim();
+}
+
+/* =========================================================
+ * (일상 대화) 노트패드용 프롬프트 — GET /api/voice/daily/prompts
+ * ========================================================= */
+exports.getDailyVoicePrompt = async (_req, res) => {
+  try {
+    const mode = 'daily';
+    const title = '일상 대화';
+    const text  = getDailyPrompt();
+    return res.json({ success: true, mode, title, prompt: text });
+  } catch (e) {
+    console.error('getDailyVoicePrompt error:', e?.message || e);
+    return res.status(500).json({ success:false, message:'프롬프트 조회 실패' });
+  }
+};
+
+/* =========================================================
+ * (일상 대화) 서버가 먼저 인사/질문(TTS) — GET /api/voice/daily/hello?as=stream
+ * ========================================================= */
+exports.dailyVoiceHello = async (req, res) => {
+  try {
+    const mode = 'daily';
+    const starter = pickDailyStarter(); // { situation, question }
+    const fullText = `[${starter.situation}]\n: ${starter.question}`;
+
+    // TTS
+    const [ttsResp] = await ttsClient.synthesizeSpeech({
+      input: { text: fullText },
+      voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
+      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
+    });
+    const mp3Buffer = Buffer.from(ttsResp.audioContent);
+
+    if (!(req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg'))) {
+      return res.json({
+        success: true,
+        mode,
+        situation: starter.situation,
+        question:  starter.question,
+        text:      fullText,
+        audioBase64: mp3Buffer.toString('base64'),
+        mimeType: 'audio/mpeg'
+      });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', mp3Buffer.length);
+    return res.end(mp3Buffer);
+
+  } catch (err) {
+    logTtsError('dailyVoiceHello', err);
+    return res.status(500).json({ success:false, message:'dailyVoiceHello 실패', hint: err?.message });
+  }
+};
+
+/* =========================================================
+ * (일상 대화) STT → GPT(JSON) → TTS — POST /api/voice/daily/chat
+ * multipart: audio, systemPrompt?, temperature?
+ * ========================================================= */
+exports.dailyVoiceChat = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success:false, message:'audio 파일이 필요합니다.(form-data: audio)' });
+    }
+
+    // 1) STT
+    let sttText = '';
+    try {
+      const fd = new FormData();
+      fd.append('file', req.file.buffer, { filename: req.file.originalname || 'audio.m4a' });
+      fd.append('model', STT_MODEL);
+      const sttResp = await oa.post('/audio/transcriptions', fd, { headers: fd.getHeaders() });
+      sttText = (sttResp.data?.text || '').trim();
+    } catch (e1) {
+      logOpenAiError('DAILY-STT-primary', e1);
+      try {
+        const fd2 = new FormData();
+        fd2.append('file', req.file.buffer, { filename: req.file.originalname || 'audio.m4a' });
+        fd2.append('model', 'whisper-1');
+        const sttResp2 = await oa.post('/audio/transcriptions', fd2, { headers: fd2.getHeaders() });
+        sttText = (sttResp2.data?.text || '').trim();
+      } catch (e2) {
+        logOpenAiError('DAILY-STT-fallback', e2);
+        return res.status(502).json({ success:false, message:'STT 실패', hint: e2?.message });
+      }
+    }
+    if (!sttText) return res.status(400).json({ success:false, message:'음성에서 텍스트를 추출하지 못했습니다.' });
+
+    // 2) GPT — (일상 대화) JSON 스키마 강제
+    const mode = 'daily'; // 🔒 강제
+    const baseSystem = getDailyPrompt();
+    const systemOverride = req.body?.systemPrompt ? String(req.body.systemPrompt) : '';
+    const systemPrompt = systemOverride ? `${baseSystem}\n\n---\n(override)\n${systemOverride}` : baseSystem;
+    const temperature  = Number(req.body?.temperature ?? 0.7); // 일상 대화는 살짝 더 자유롭게
+
+    let gptJson; // { reply, tip, needRetry, critique }
+    try {
+      const gpt = await oa.post('/chat/completions', {
+        model: GPT_MODEL,
+        messages: [
+          { role:'system', content: systemPrompt },
+          { role:'user',   content: sttText }
+        ],
+        temperature,
+        max_tokens: 600
+      });
+
+      const raw = (gpt.data?.choices?.[0]?.message?.content || '').trim();
+      try {
+        gptJson = JSON.parse(raw);
+      } catch (e) {
+        const m = raw.match(/\{[\s\S]*\}$/);
+        gptJson = m ? JSON.parse(m[0]) : null;
+      }
+      if (!gptJson || typeof gptJson.reply !== 'string') throw new Error('Invalid JSON reply from GPT');
+
+      gptJson.reply     = gptJson.reply.trim();
+      gptJson.tip       = gptJson.tip ? String(gptJson.tip).trim() : null;
+      gptJson.needRetry = Boolean(gptJson.needRetry);
+      gptJson.critique  = gptJson.critique ? String(gptJson.critique).trim() : null;
+
+    } catch (gptErr) {
+      logOpenAiError('DAILY-GPT', gptErr);
+      return res.status(502).json({ success:false, message:'GPT 호출 실패', hint: gptErr?.message });
+    }
+
+    // 3) TTS — reply만 읽음
+    let mp3Buffer;
+    try {
+      const [ttsResp] = await ttsClient.synthesizeSpeech({
+        input: { text: gptJson.reply },
+        voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
+      });
+      mp3Buffer = Buffer.from(ttsResp.audioContent);
+    } catch (ttsErr) {
+      logTtsError('dailyVoiceChat', ttsErr);
+      return res.status(502).json({ success:false, message:'TTS 실패', hint: ttsErr?.message });
+    }
+
+    // 4) 응답 (job과 동일한 형태)
+    if (req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', mp3Buffer.length);
+      return res.end(mp3Buffer);
+    }
+    return res.json({
+      success: true,
+      mode,
+      userText: sttText,
+      text: gptJson.reply,
+      audioBase64: mp3Buffer.toString('base64'),
+      mimeType: 'audio/mpeg',
+      hint: gptJson.tip,            // 프론트: "TIP:" 접두
+      needRetry: gptJson.needRetry, // 사용자 말풍선 빨간 테두리 여부
+      critique: gptJson.critique
+    });
+
+  } catch (err) {
+    console.error('dailyVoiceChat error (top):', err?.message || err);
+    return res.status(500).json({ success:false, message:'dailyVoiceChat 실패', hint: err?.message });
+  }
+};
