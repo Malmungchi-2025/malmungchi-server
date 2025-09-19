@@ -72,6 +72,10 @@ exports.register = async (req, res) => {
     // 1) 먼저 커밋해서 DB 일관성 보장
     await client.query('COMMIT');
 
+    // ✅ 여기서 OTP 생성 + 로그 (최소 수정)
+    const otp = generateNumericOtp(6);
+    console.log(`[DEBUG][EMAIL_OTP] ${user.email} → ${otp}`);
+
     // 2) 그 다음 메일 발송 (실패해도 가입은 성공) - throw 방지
     let mailed = true;
     try {
@@ -114,9 +118,7 @@ function generateNumericOtp(digits = 6) {
 }
 
 
-// 회원가입(register) 함수 안, 토큰 생성 이후에 추가:
-const otp = generateNumericOtp(6);
-console.log(`[DEBUG][EMAIL_OTP] ${email} → ${otp}`);
+
 
 // 2) 이메일 인증
 exports.verifyEmail = async (req, res) => {
