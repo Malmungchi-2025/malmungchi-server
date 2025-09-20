@@ -471,6 +471,33 @@ exports.dailyVoiceChat = async (req, res) => {
       return res.status(502).json({ success:false, message:'GPT 호출 실패', hint: gptErr?.message });
     }
 
+    // === (A) 파싱 직후 보정 로직 추가 — 자유 대화 UX 보장 ===
+    {
+      const u = (sttText || '').trim();
+      const plain = u.replace(/\s/g, ''); // 공백 제외
+
+      // "짧음/모호함" 휴리스틱
+      const tooShort  = plain.length < 15;
+      const looksVague = /그냥|그럭저럭|그랬어|보냈어|지냈어|했어[.!?]?$|괜찮았|좋았|나쁘지|편했어/.test(u);
+
+      // TIP 누락 시 기본 TIP 채움 (이미 반영됨)
+      if (!gptJson.tip || gptJson.tip.trim().length < 4) {
+        gptJson.tip = '무엇(사실)·어디(장소)·누구와·얼마나(수치)·왜(이유) 중 2가지를 1~2문장으로 덧붙여 주세요.';
+      }
+
+      // 짧거나 모호하면 needRetry 강제
+      if (tooShort || looksVague) {
+        gptJson.needRetry = true;
+        if (!gptJson.reply || !gptJson.reply.includes('다시 한 번 해볼까요?')) {
+          gptJson.reply = `다시 한 번 해볼까요? ${gptJson.reply || ''}`.trim();
+        }
+        if (!gptJson.critique) {
+          gptJson.critique = '서술이 짧고 구체성이 낮음';
+        }
+      }
+    }
+    // === 보정 로직 끝 ===
+
     // 3) TTS — reply만 읽음
     let mp3Buffer;
     try {
