@@ -693,5 +693,173 @@ router.post('/gpt/ai-chat/touch-today', gptController.touchTodayAiChat);
 router.post('/gpt/ai-chat/complete-reward', gptController.giveAiChatDailyReward);
 
 
+/**
+ * @swagger
+ * tags:
+ *   - name: Levels (3Q)
+ *     description: 3문항·4지선다·해설 포함 신규 레벨 테스트 플로우
+ */
+
+/**
+ * @swagger
+ * components:
+ *   securitySchemes:
+ *     bearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     LevelsQuestion:
+ *       type: object
+ *       required: [questionIndex, question, options, answerIndex, explanation]
+ *       properties:
+ *         questionIndex:
+ *           type: integer
+ *           enum: [1,2,3]
+ *           description: 1~3 고정
+ *         question:
+ *           type: string
+ *         options:
+ *           type: array
+ *           minItems: 4
+ *           maxItems: 4
+ *           items: { type: string }
+ *         answerIndex:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 3
+ *         explanation:
+ *           type: string
+ *     LevelsGenerateResponse:
+ *       type: object
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         passage: { type: string }
+ *         questions:
+ *           type: array
+ *           minItems: 3
+ *           maxItems: 3
+ *           items: { $ref: '#/components/schemas/LevelsQuestion' }
+ *     LevelsSubmitRequest:
+ *       type: object
+ *       required: [stage, questions, answers]
+ *       properties:
+ *         stage:
+ *           type: integer
+ *           enum: [0,1,2,3]
+ *         questions:
+ *           type: array
+ *           minItems: 3
+ *           maxItems: 3
+ *           items: { $ref: '#/components/schemas/LevelsQuestion' }
+ *         answers:
+ *           type: array
+ *           minItems: 3
+ *           maxItems: 3
+ *           items:
+ *             type: integer
+ *             minimum: 0
+ *             maximum: 3
+ */
+
+/**
+ * @swagger
+ * /api/gpt/levels/start:
+ *   post:
+ *     summary: 레벨 테스트 시작(3문항 플로우)
+ *     description: stage=0이면 users.level=0으로 리셋, 동일 user&stage의 기존 시도 삭제
+ *     tags: [Levels (3Q)]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [stage]
+ *             properties:
+ *               stage:
+ *                 type: integer
+ *                 enum: [0,1,2,3]
+ *                 example: 1
+ *     responses:
+ *       200: { description: 시작 처리 성공 }
+ *       400: { description: 잘못된 단계 값 }
+ *       401: { description: 인증 필요 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/levels/start', gptController.levelsStart);
+
+/**
+ * @swagger
+ * /api/gpt/levels/generate:
+ *   post:
+ *     summary: 글감 + 3문항(4지선다/해설) 생성
+ *     tags: [Levels (3Q)]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [stage]
+ *             properties:
+ *               stage:
+ *                 type: integer
+ *                 enum: [0,1,2,3]
+ *                 example: 1
+ *     responses:
+ *       200:
+ *         description: 생성 성공
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/LevelsGenerateResponse' }
+ *       400: { description: 잘못된 단계 값 }
+ *       401: { description: 인증 필요 }
+ *       500: { description: 문제 생성 실패 }
+ */
+router.post('/levels/generate', gptController.levelsGenerate);
+
+/**
+ * @swagger
+ * /api/gpt/levels/submit:
+ *   post:
+ *     summary: 제출/채점/저장(3문항 플로우)
+ *     tags: [Levels (3Q)]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/LevelsSubmitRequest' }
+ *     responses:
+ *       200:
+ *         description: 채점/저장 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 correctCount: { type: integer, example: 2 }
+ *                 resultLevel: { type: string, enum: [기초,활용,심화,고급], example: 심화 }
+ *                 detail:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       questionIndex: { type: integer, example: 1 }
+ *                       isCorrect: { type: boolean, example: true }
+ *                       answerIndex: { type: integer, example: 2 }
+ *                       userChoice: { type: integer, example: 2 }
+ *                       explanation: { type: string }
+ *       400: { description: 요청 형식 오류 }
+ *       401: { description: 인증 필요 }
+ *       500: { description: 서버 오류 }
+ */
+router.post('/levels/submit', gptController.levelsSubmit);
+
+
 module.exports = router;
 

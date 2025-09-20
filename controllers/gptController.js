@@ -2318,4 +2318,230 @@ exports.giveAiChatDailyReward = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────
+// 0) 단계별 글감: 지금은 모든 stage(0~3)에 동일 본문 사용
+//    (나중에 단계별로 교체만 하면 됨)
+// ─────────────────────────────────────────────
+const PASSAGES = {
+  0: `“빛을 보기 위해 눈이 있고, 소리를 듣기 위해 귀가 있듯이, 너희들은 시간을 느끼기 위해 가슴을 갖고 있단다. 가슴으로 느끼지 않은 시간은 모두 없어져 버리지. (중략) 허나 슬프게도 이 세상에는 쿵쿵 뛰고 있는데도 아무것도 느끼지 못하는, 눈멀고, 귀 먹은 가슴들이 수두룩하단다.”
+“그럼 제 가슴이 언젠가 뛰기를 멈추면 어떻게 돼요?”
+“그럼, 네게 지정된 시간도 멈추게 되지. 아가, 네가 살아 온 시간, 다시 말해서 지나 온 너의 낮과 밤들, 달과 해들을 지나 되돌아간다고 말할 수도 있을 게다. 너는 너의 일생을 지나 되돌아가는 게야. 언젠가 네가 그 문을 통해 들어왔던 둥근 은빛 성문에 닿을 때까지 말이지. 거기서 너는 그 문을 다시 나가게 되지.”`,
+  1: `“빛을 보기 위해 눈이 있고, 소리를 듣기 위해 귀가 있듯이, 너희들은 시간을 느끼기 위해 가슴을 갖고 있단다. 가슴으로 느끼지 않은 시간은 모두 없어져 버리지. (중략) 허나 슬프게도 이 세상에는 쿵쿵 뛰고 있는데도 아무것도 느끼지 못하는, 눈멀고, 귀 먹은 가슴들이 수두룩하단다.”
+“그럼 제 가슴이 언젠가 뛰기를 멈추면 어떻게 돼요?”
+“그럼, 네게 지정된 시간도 멈추게 되지. 아가, 네가 살아 온 시간, 다시 말해서 지나 온 너의 낮과 밤들, 달과 해들을 지나 되돌아간다고 말할 수도 있을 게다. 너는 너의 일생을 지나 되돌아가는 게야. 언젠가 네가 그 문을 통해 들어왔던 둥근 은빛 성문에 닿을 때까지 말이지. 거기서 너는 그 문을 다시 나가게 되지.”`,
+  2: `“빛을 보기 위해 눈이 있고, 소리를 듣기 위해 귀가 있듯이, 너희들은 시간을 느끼기 위해 가슴을 갖고 있단다. 가슴으로 느끼지 않은 시간은 모두 없어져 버리지. (중략) 허나 슬프게도 이 세상에는 쿵쿵 뛰고 있는데도 아무것도 느끼지 못하는, 눈멀고, 귀 먹은 가슴들이 수두룩하단다.”
+“그럼 제 가슴이 언젠가 뛰기를 멈추면 어떻게 돼요?”
+“그럼, 네게 지정된 시간도 멈추게 되지. 아가, 네가 살아 온 시간, 다시 말해서 지나 온 너의 낮과 밤들, 달과 해들을 지나 되돌아간다고 말할 수도 있을 게다. 너는 너의 일생을 지나 되돌아가는 게야. 언젠가 네가 그 문을 통해 들어왔던 둥근 은빛 성문에 닿을 때까지 말이지. 거기서 너는 그 문을 다시 나가게 되지.”`,
+  3: `“빛을 보기 위해 눈이 있고, 소리를 듣기 위해 귀가 있듯이, 너희들은 시간을 느끼기 위해 가슴을 갖고 있단다. 가슴으로 느끼지 않은 시간은 모두 없어져 버리지. (중략) 허나 슬프게도 이 세상에는 쿵쿵 뛰고 있는데도 아무것도 느끼지 못하는, 눈멀고, 귀 먹은 가슴들이 수두룩하단다.”
+“그럼 제 가슴이 언젠가 뛰기를 멈추면 어떻게 돼요?”
+“그럼, 네게 지정된 시간도 멈추게 되지. 아가, 네가 살아 온 시간, 다시 말해서 지나 온 너의 낮과 밤들, 달과 해들을 지나 되돌아간다고 말할 수도 있을 게다. 너는 너의 일생을 지나 되돌아가는 게야. 언젠가 네가 그 문을 통해 들어왔던 둥근 은빛 성문에 닿을 때까지 말이지. 거기서 너는 그 문을 다시 나가게 되지.”`,
+};
 
+// ─────────────────────────────────────────────
+// 유틸
+// ─────────────────────────────────────────────
+function isStringArray4(arr) {
+  return Array.isArray(arr) && arr.length === 4 && arr.every(s => typeof s === 'string' && s.trim().length > 0);
+}
+function clampChoice(i) {
+  const n = Number(i);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(3, n));
+}
+// ─────────────────────────────────────────────
+// NEW 3-문항 레벨 테스트: 컨트롤러 핸들러 (routes에서 /levels로 연결)
+// ─────────────────────────────────────────────
+
+// 1) 시작: POST /api/gpt/levels/start
+exports.levelsStart = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { stage } = req.body || {};
+    if (![0,1,2,3].includes(stage)) {
+      return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+    }
+
+    await client.query('BEGIN');
+
+    if (stage === 0) {
+      await client.query(
+        `UPDATE public.users SET level = 0, updated_at = now() WHERE id = $1`,
+        [userId]
+      );
+    }
+
+    await client.query(
+      `DELETE FROM quiz_level_test_new WHERE user_id = $1 AND stage = $2`,
+      [userId, stage]
+    );
+
+    await client.query('COMMIT');
+    return res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ /levels/start 오류:', err);
+    return res.status(500).json({ success: false, message: '시작 처리 실패' });
+  } finally {
+    client.release();
+  }
+};
+
+// 2) 생성: POST /api/gpt/levels/generate
+exports.levelsGenerate = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { stage } = req.body || {};
+    if (![0,1,2,3].includes(stage)) {
+      return res.status(400).json({ success: false, message: '잘못된 단계 값' });
+    }
+
+    const passage = PASSAGES[stage] ?? PASSAGES[0];
+    if (!passage) {
+      return res.status(500).json({ success: false, message: `stage=${stage} 글감 미설정` });
+    }
+
+    const system = { role: 'system', content: '너는 한국어 독해/문해력 4지선다 문제 출제자이다.' };
+    const user = {
+      role: 'user',
+      content:
+`다음 글감을 바탕으로 총 3개의 4지선다 문제를 만들어라. 모든 출력은 JSON 배열 하나로만 하라(코드블록 금지).
+문항 규칙:
+1) 1번: 이 글의 핵심 내용을 가장 잘 요약한 것은?
+2) 2번: 이 글의 주제를 가장 잘 파악한 것은?
+3) 3번: 글감의 어려운 단어 1개를 골라 '정확한 의미'를 묻는 문제.
+스키마:
+{ "questionIndex": 1|2|3, "question": "…", "options": ["A","B","C","D"], "answerIndex": 0|1|2|3, "explanation": "1~2문장" }
+조건: 한국어, options 4개, 중복 금지, explanation은 '정답:' 접두 금지
+글감:
+${passage}`
+    };
+
+    const openaiResp = await oa.post('/chat/completions', {
+      model: 'gpt-4o-mini',
+      temperature: 0.6,
+      max_tokens: 1200,
+      messages: [system, user],
+    });
+
+    let text = String(openaiResp?.data?.choices?.[0]?.message?.content || '[]')
+      .replace(/^```json/i,'').replace(/^```/i,'').replace(/```$/i,'').trim();
+
+    let arr;
+    try { arr = JSON.parse(text); }
+    catch {
+      const m = text.match(/\[[\s\S]*\]/);
+      arr = m ? JSON.parse(m[0]) : [];
+    }
+    if (!Array.isArray(arr)) arr = [];
+
+    const questions = [];
+    for (const it of arr) {
+      const qi = Number(it?.questionIndex);
+      const q  = String(it?.question || '').trim();
+      const opts = it?.options;
+      const ai = Number(it?.answerIndex);
+      const exp = String(it?.explanation || '').trim();
+
+      if (![1,2,3].includes(qi)) continue;
+      if (!q || !isStringArray4(opts)) continue;
+      if (!(ai>=0 && ai<=3)) continue;
+      if (!exp || exp.length < 3) continue;
+
+      questions.push({ questionIndex: qi, question: q, options: opts.map(String), answerIndex: ai, explanation: exp });
+    }
+
+    if (questions.length !== 3) {
+      return res.status(500).json({ success: false, message: '생성 문항이 3개가 아님(또는 형식 오류)' });
+    }
+
+    return res.json({ success: true, passage, questions });
+  } catch (err) {
+    console.error('❌ /levels/generate 오류:', err?.response?.data || err.message);
+    return res.status(500).json({ success: false, message: '문제 생성 실패' });
+  } finally {
+    client.release();
+  }
+};
+
+// 3) 제출: POST /api/gpt/levels/submit
+exports.levelsSubmit = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+    const { stage, questions, answers } = req.body || {};
+    if (![0,1,2,3].includes(stage)) return res.status(400).json({ success:false, message:'잘못된 단계 값' });
+    if (!Array.isArray(questions) || questions.length !== 3) return res.status(400).json({ success:false, message:'questions 3개 필요' });
+    if (!Array.isArray(answers) || answers.length !== 3) return res.status(400).json({ success:false, message:'answers 3개 필요' });
+
+    const cleaned = [];
+    for (const it of questions) {
+      const qi = Number(it?.questionIndex);
+      const q  = String(it?.question || '').trim();
+      const opts = it?.options;
+      const ai = Number(it?.answerIndex);
+      const exp = String(it?.explanation || '').trim();
+      if (![1,2,3].includes(qi)) return res.status(400).json({ success:false, message:`questionIndex 오류(${qi})` });
+      if (!q || !isStringArray4(opts)) return res.status(400).json({ success:false, message:`문항 ${qi} 형식 오류` });
+      if (!(ai>=0 && ai<=3)) return res.status(400).json({ success:false, message:`문항 ${qi} answerIndex 오류` });
+      if (!exp) return res.status(400).json({ success:false, message:`문항 ${qi} 해설 누락` });
+      cleaned.push({ questionIndex: qi, question: q, options: opts, answerIndex: ai, explanation: exp });
+    }
+
+    const userChoices = answers.map(clampChoice);
+    let correctCount = 0;
+
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM quiz_level_test_new WHERE user_id=$1 AND stage=$2`, [userId, stage]);
+
+    const insertSql = `
+      INSERT INTO quiz_level_test_new
+      (user_id, stage, question_index, question, options, answer_index, explanation, user_choice, is_correct)
+      VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)
+    `;
+
+    const detail = [];
+    for (let i=0;i<cleaned.length;i++) {
+      const it = cleaned[i];
+      const choice = userChoices[i];
+      const ok = (choice === it.answerIndex);
+      if (ok) correctCount++;
+
+      await client.query(insertSql, [
+        userId, stage, it.questionIndex,
+        it.question, JSON.stringify(it.options),
+        it.answerIndex, it.explanation,
+        choice, ok
+      ]);
+
+      detail.push({ questionIndex: it.questionIndex, isCorrect: ok, answerIndex: it.answerIndex, userChoice: choice, explanation: it.explanation });
+    }
+
+    let resultLevel = '기초';
+    if (correctCount === 3) resultLevel = '고급';
+    else if (correctCount === 2) resultLevel = '심화';
+    else if (correctCount === 1) resultLevel = '활용';
+
+    const levelMap = { '기초': 1, '활용': 2, '심화': 3, '고급': 4 };
+    const targetLevel = levelMap[resultLevel] ?? null;
+    if (targetLevel !== null) {
+      await client.query(`UPDATE public.users SET level=$2, updated_at=now() WHERE id=$1`, [userId, targetLevel]);
+    }
+
+    await client.query('COMMIT');
+    return res.json({ success: true, correctCount, resultLevel, detail });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ /levels/submit 오류:', err);
+    return res.status(500).json({ success: false, message: '제출/채점 실패' });
+  } finally {
+    client.release();
+  }
+};
