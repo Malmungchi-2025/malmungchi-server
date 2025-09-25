@@ -260,6 +260,43 @@ exports.login = async (req, res) => {
   }
 };
 
+
+//아바타 저장
+// PATCH /api/auth/me/avatar
+exports.updateMyAvatar = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+  try {
+    let { avatarName } = req.body || {};
+    if (typeof avatarName !== 'string' || !avatarName.trim()) {
+      return res.status(400).json({ success:false, message:'avatarName이 필요합니다.' });
+    }
+    avatarName = avatarName.trim();
+
+    // DB CHECK 제약과 동일한 화이트리스트(서버단 1차 방어)
+    const ALLOWED = new Set([
+      'img_glass_malchi','img_malchi','img_mungchi','img_glass_mungchi'
+    ]);
+    if (!ALLOWED.has(avatarName)) {
+      return res.status(400).json({ success:false, message:'허용되지 않은 아바타입니다.' });
+    }
+
+    await pool.query(
+      `UPDATE users
+         SET avatar_name = $1,
+             updated_at  = NOW()
+       WHERE id = $2`,
+      [avatarName, userId]
+    );
+
+    return res.json({ success:true, result:{ avatarName }});
+  } catch (e) {
+    console.error('updateMyAvatar error:', e);
+    return res.status(500).json({ success:false, message:'아바타 저장 실패' });
+  }
+};
+
 // 5) 내 정보
 exports.me = async (req, res) => {
   if (!req.user?.id) {

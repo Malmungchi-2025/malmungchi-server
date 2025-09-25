@@ -144,6 +144,9 @@ router.post('/resend', resendVerification);
  */
 router.post('/login', loginUser);
 
+//아바타
+router.patch('/api/auth/me/avatar', auth, updateMyAvatar);
+
 /**
  * @swagger
  * /api/auth/me:
