@@ -277,7 +277,8 @@ exports.me = async (req, res) => {
         created_at, 
         level,
         point,
-        nickname_title  -- nickname_title 필드 추가
+        nickname_title,
+        avatar_name        
       FROM users 
       WHERE id = $1
       LIMIT 1
@@ -299,7 +300,9 @@ exports.me = async (req, res) => {
       createdAt: user.created_at, // 필요하면 ISO로 변환 new Date(user.created_at).toISOString()
       level: user.level ?? 0,
       point: user.point ?? 0,
-      nicknameTitle: user.nickname_title ?? ''  // nickname_title 필드를 응답에 추가
+      nicknameTitle: user.nickname_title ?? '',  // nickname_title 필드를 응답에 추가
+      avatarName: user.avatar_name ?? 'img_malchi', 
+    
     };
 
     return res.json({ success: true, result });
