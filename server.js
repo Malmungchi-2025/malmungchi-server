@@ -13,6 +13,7 @@ const path = require('path');
   }
   const credPath = '/opt/render/project/.data/gcp-tts.json';
   try {
+    fs.mkdirSync(path.dirname(credPath), { recursive: true }); // ★ 폴더 보장 (필수)
     const buf = Buffer.from(b64, 'base64');
     fs.writeFileSync(credPath, buf, { mode: 0o600 });
     process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
