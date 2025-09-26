@@ -59,3 +59,79 @@ exports.addFriendByCode = async (req, res) => {
     return res.status(500).json({ success:false, message:'친구 추가 실패' });
   }
 };
+
+// GET /api/friends/ranking?limit=50
+exports.getFriendsRanking = async (req, res) => {
+  try {
+    const myId = req.user?.id;
+    if (!myId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+    // 나와 친구(ACCEPTED)인 사용자만 추려서 포인트 내림차순
+    const q = `
+      SELECT u.id, u.name, u.avatar_name, u.point
+        FROM public.friend_edges fe
+        JOIN public.users u
+          ON u.id = CASE
+                      WHEN fe.requester_id = $1 THEN fe.addressee_id
+                      ELSE fe.requester_id
+                    END
+       WHERE fe.status = 'ACCEPTED'
+         AND ($1 = fe.requester_id OR $1 = fe.addressee_id)
+       ORDER BY u.point DESC, u.id ASC
+       LIMIT $2
+    `;
+    const { rows } = await pool.query(q, [myId, limit]);
+
+    return res.json({
+      success: true,
+      result: {
+        meId: myId,       // 프론트에서 isMe 판단용
+        items: rows.map(r => ({
+          id: r.id,
+          name: r.name,
+          avatarName: r.avatar_name,
+          point: r.point
+        }))
+      }
+    });
+  } catch (e) {
+    console.error('getFriendsRanking error:', e);
+    return res.status(500).json({ success:false, message:'랭킹 조회 실패' });
+  }
+};
+
+// GET /api/friends/ranking/all?limit=50
+exports.getGlobalRanking = async (req, res) => {
+  try {
+    const myId = req.user?.id;
+    if (!myId) return res.status(401).json({ success:false, message:'인증 필요' });
+
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+    const q = `
+      SELECT id, name, avatar_name, point
+        FROM public.users
+       ORDER BY point DESC, id ASC
+       LIMIT $1
+    `;
+    const { rows } = await pool.query(q, [limit]);
+
+    return res.json({
+      success: true,
+      result: {
+        meId: myId,  // 프론트 isMe 판단용
+        items: rows.map(r => ({
+          id: r.id,
+          name: r.name,
+          avatarName: r.avatar_name,
+          point: r.point
+        }))
+      }
+    });
+  } catch (e) {
+    console.error('getGlobalRanking error:', e);
+    return res.status(500).json({ success:false, message:'전체 랭킹 조회 실패' });
+  }
+};

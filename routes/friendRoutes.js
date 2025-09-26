@@ -6,4 +6,7 @@ const { addFriendByCode } = require('../controllers/friendController');
 const { requireLogin } = require('../middlewares/auth');
 router.post('/by-code', requireLogin, addFriendByCode);
 
+router.get('/ranking', requireLogin, getFriendsRanking);       // 친구 랭킹
+router.get('/ranking/all', requireLogin, getGlobalRanking);    // 전체 랭킹
+
 module.exports = router;
