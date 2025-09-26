@@ -42,6 +42,9 @@ app.use((req, res, next) => {
 });
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
+const { auth } = require('./middlewares/auth');
+app.use(auth); // ← 모든 라우트 전에 토큰 파싱/유저 주입
+
 app.get('/', (req, res) => res.send('🚀 Malmungchi Server is running...'));
 
 const authDevRoutes = require('./routes/authDevRoutes');

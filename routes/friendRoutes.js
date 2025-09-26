@@ -2,9 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { addFriendByCode } = require('../controllers/friendController');
 
-// 🔒 인증 미들웨어는 프로젝트에서 쓰는 걸로 교체하세요.
-const requireAuth = require('../middleware/auth'); // 예: module.exports = (req,res,next)=>{...}
-
+// ✅ 우리 프로젝트 미들웨어 (토큰 파싱은 global, 보호는 여기서)
+const { requireLogin } = require('../middlewares/auth');
 router.post('/by-code', requireAuth, addFriendByCode);
 
 module.exports = router;
