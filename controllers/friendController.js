@@ -31,14 +31,18 @@ exports.addFriendByCode = async (req, res) => {
     }
 
     // 친구 관계 업서트 (무조건 ACCEPTED로)
+       // 항상 '작은 id, 큰 id' 순서로 저장 (무향 관계 한 행만 유지)
+    const a = Math.min(myId, other.id);
+    const b = Math.max(myId, other.id);
     const upsertSql = `
       INSERT INTO public.friend_edges (requester_id, addressee_id, status, accepted_at)
       VALUES ($1, $2, 'ACCEPTED', now())
-      ON CONFLICT ON CONSTRAINT friend_edges_pair_uniq
+      ON CONFLICT (requester_id, addressee_id)
       DO UPDATE SET status = 'ACCEPTED', accepted_at = now()
       RETURNING id, requester_id, addressee_id, status, accepted_at, updated_at
     `;
-    const r = await pool.query(upsertSql, [myId, other.id]);
+    const r = await pool.query(upsertSql, [a, b]);
+    
 
     return res.json({
       success: true,
