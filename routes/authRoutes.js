@@ -16,7 +16,8 @@ const {
   getMyVocabulary,
   toggleMyVocabularyLike,
   getMyLikedVocabulary,
-  saveNicknameTestIntoUsers 
+  saveNicknameTestIntoUsers,
+  updateMyAvatar,
 } = require('../controllers/authController');
 
 
@@ -145,7 +146,36 @@ router.post('/resend', resendVerification);
 router.post('/login', loginUser);
 
 //아바타
-router.patch('/api/auth/me/avatar', auth, updateMyAvatar);
+
+/**
+ * @swagger
+ * /api/auth/me/avatar:
+ *   patch:
+ *     summary: 아바타 변경
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [avatarName]
+ *             properties:
+ *               avatarName:
+ *                 type: string
+ *                 enum: [img_glass_malchi, img_malchi, img_mungchi, img_glass_mungchi]
+ *                 example: img_malchi
+ *     responses:
+ *       200:
+ *         description: 아바타 저장 성공
+ *       400:
+ *         description: 잘못된 요청(허용되지 않은 아바타 등)
+ *       401:
+ *         description: 인증 필요
+ */
+router.patch('/me/avatar', auth, requireLogin, updateMyAvatar); // ✅ 상대경로+보호 미들웨어
 
 /**
  * @swagger
