@@ -225,7 +225,7 @@ exports.login = async (req, res) => {
     email = String(email).trim().toLowerCase();
 
     const r = await pool.query(
-      `SELECT id, email, password, is_verified, name, nickname, level
+       `SELECT id, email, password, is_verified, name, nickname, level, friend_code
        FROM users WHERE email = $1 LIMIT 1`,
       [email]
     );
@@ -251,7 +251,8 @@ exports.login = async (req, res) => {
         name: user.name,
         nickname: user.nickname,
         is_verified: user.is_verified,
-        level: user.level   // ✅ 추가
+        level: user.level,   // ✅ 추가
+        friend_code: user.friend_code 
       }
     });
   } catch (e) {
@@ -315,7 +316,8 @@ exports.me = async (req, res) => {
         level,
         point,
         nickname_title,
-        avatar_name        
+        avatar_name,
+        friend_code        
       FROM users 
       WHERE id = $1
       LIMIT 1
@@ -339,6 +341,7 @@ exports.me = async (req, res) => {
       point: user.point ?? 0,
       nicknameTitle: user.nickname_title ?? '',  // nickname_title 필드를 응답에 추가
       avatarName: user.avatar_name ?? 'img_malchi', 
+      friendCode: user.friend_code 
     
     };
 

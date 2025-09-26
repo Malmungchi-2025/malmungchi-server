@@ -47,6 +47,9 @@ app.get('/', (req, res) => res.send('🚀 Malmungchi Server is running...'));
 const authDevRoutes = require('./routes/authDevRoutes');
 app.use('/api/auth', authDevRoutes);
 
+const friendRoutes = require('./routes/friendRoutes');
+app.use('/api/friends', friendRoutes);
+
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
 
