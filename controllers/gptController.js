@@ -689,9 +689,9 @@ exports.generateQuiz = async (req, res) => {
       ],
       temperature: 0.2,
       max_tokens: 900,
-      // 최신 SDK/엔드포인트에서 지원 시 JSON 강제
-      response_format: { type: 'json' }
-      // 필요 시 json_schema로 더 강하게 강제 가능:
+      // Chat Completions에서 허용되는 타입
+      response_format: { type: 'json_object' }
+      // 더 강하게 보장하고 싶으면 아래 주석 해제해 json_schema 사용
       // response_format: {
       //   type: 'json_schema',
       //   json_schema: {
@@ -717,7 +717,6 @@ exports.generateQuiz = async (req, res) => {
       //   }
       // }
     };
-
     // 2-2) 실제 요청 — 반드시 payload 사용!
     const gptRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
