@@ -616,12 +616,11 @@ exports.getHandwriting = async (req, res) => {
 };
 
 // ──────────────────────────────────────────────────────────────
-/**
- * 7. 퀴즈 생성 (중복이면 기존 반환)
- * POST /api/gpt/generate-quiz
- *  - ✅ user_id 필수
- *  - ✅ study 소유권 검증
- */
+// 7. 퀴즈 생성 (중복이면 기존 반환)
+// POST /api/gpt/generate-quiz
+//  - ✅ user_id 필수
+//  - ✅ study 소유권 검증
+// ──────────────────────────────────────────────────────────────
 exports.generateQuiz = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -634,9 +633,9 @@ exports.generateQuiz = async (req, res) => {
 
     await assertStudyOwnerOrThrow(studyId, userId);
 
-    // 1) 기존 퀴즈 있으면 그대로 반환
+    // 1) 기존 퀴즈 있으면 그대로 반환 (type 포함)
     const existed = await pool.query(
-      `SELECT question_index, question, options, answer, explanation
+      `SELECT question_index, type, question, options, answer, explanation
          FROM quiz_set
         WHERE study_id = $1
         ORDER BY question_index`,
@@ -645,6 +644,7 @@ exports.generateQuiz = async (req, res) => {
     if (existed.rows.length > 0) {
       const quizzes = existed.rows.map(r => ({
         questionIndex: r.question_index,
+        type: r.type,
         question: r.question,
         options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
         answer: r.answer,
@@ -653,22 +653,75 @@ exports.generateQuiz = async (req, res) => {
       return res.json({ success: true, result: quizzes });
     }
 
-    // 2) GPT 호출 (기능 동일)
+    // 2) GPT 프롬프트
     const prompt = `
-너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩 골라서**, 각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
-[문제 유형] 1~5 ...
-[출력 형식] [{"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."}]
-[조건] JSON 배열만, 각 문제 유형은 서로 달라야 함, options 4개, answer는 그 중 하나, question은 한 문장
+너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩** 골라,
+각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
+
+[문제 유형]
+1) 중심 내용 파악  2) 세부 내용 파악  3) 어휘/표현 추론
+4) 화자의 태도/감정 5) 주제/의도 파악
+
+[출력 형식]
+[
+  {"type":"...", "question":"...", "options":["...","...","...","..."], "answer":"...", "explanation":"..."},
+  {"type":"...", "question":"...", "options":["...","...","...","..."], "answer":"...", "explanation":"..."},
+  {"type":"...", "question":"...", "options":["...","...","...","..."], "answer":"...", "explanation":"..."}
+]
+
+[필수 규칙]
+- **오직 위 JSON 배열만** 출력 (설명, 코드블록, 마크다운 금지)
+- 각 문제 유형은 서로 달라야 함
+- options 정확히 4개
+- answer는 options 중 하나
+- question은 한 문장
+
 원문:
 """${text}"""
-`;
+`.trim();
+
+    // 2-1) 요청 바디 (JSON 강제 옵션까지 포함) — 가능하면 최신 모델 사용 권장
+    const payload = {
+      model: process.env.OPENAI_QUIZ_MODEL || 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: '당신은 JSON만 출력하는 보조자입니다.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2,
+      max_tokens: 900,
+      // 최신 SDK/엔드포인트에서 지원 시 JSON 강제
+      response_format: { type: 'json' }
+      // 필요 시 json_schema로 더 강하게 강제 가능:
+      // response_format: {
+      //   type: 'json_schema',
+      //   json_schema: {
+      //     name: 'quiz_array',
+      //     schema: {
+      //       type: 'array',
+      //       minItems: 3,
+      //       maxItems: 3,
+      //       items: {
+      //         type: 'object',
+      //         required: ['type','question','options','answer','explanation'],
+      //         properties: {
+      //           type: { type: 'string' },
+      //           question: { type: 'string' },
+      //           options: { type: 'array', minItems: 4, maxItems: 4, items: { type: 'string' } },
+      //           answer: { type: 'string' },
+      //           explanation: { type: 'string' }
+      //         },
+      //         additionalProperties: false
+      //       }
+      //     },
+      //     strict: true
+      //   }
+      // }
+    };
+
+    // 2-2) 실제 요청 — 반드시 payload 사용!
     const gptRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7
-      },
+      payload,
       {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -677,37 +730,106 @@ exports.generateQuiz = async (req, res) => {
       }
     );
 
-    const raw = gptRes.data.choices?.[0]?.message?.content ?? '';
+    const raw = gptRes?.data?.choices?.[0]?.message?.content ?? '';
+
+    // 2-3) 방어적 JSON 추출기
+    const extractJsonArray = (s) => {
+      if (!s) return null;
+      // 코드블록 ```json ... ``` 제거
+      const cleaned = s.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '');
+      // 첫 '[' 부터 마지막 ']' 사이만 추출
+      const start = cleaned.indexOf('[');
+      const end = cleaned.lastIndexOf(']');
+      if (start === -1 || end === -1 || end < start) return null;
+      return cleaned.slice(start, end + 1);
+    };
+
     let quizzes;
     try {
-      quizzes = JSON.parse(raw);
+      const candidate = extractJsonArray(raw);
+      if (!candidate) throw new Error('JSON 배열을 찾지 못했습니다.');
+      quizzes = JSON.parse(candidate);
     } catch (e) {
       console.error('❌ GPT 응답 파싱 실패:', raw);
-      return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.' });
+      return res.status(500).json({ success: false, message: 'GPT 응답을 JSON 배열로 파싱할 수 없습니다.' });
     }
 
-    // 3) DB 저장 (options jsonb)
-    for (let i = 0; i < quizzes.length; i++) {
-      const q = quizzes[i];
-      await pool.query(
-        `INSERT INTO quiz_set (
-           study_id, question_index, type, question, options, answer, explanation
-         ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
-        [
-          studyId,
-          i + 1,
-          q.type || '유형 없음',
-          q.question,
-          JSON.stringify(q.options || []),
-          q.answer,
-          q.explanation
-        ]
-      );
+    // 2-4) 최소 스키마 검증 & 자동 보정
+    const normalize = (arr) => {
+      if (!Array.isArray(arr)) throw new Error('결과가 배열이 아닙니다.');
+      return arr.map((q, idx) => {
+        const type = (q.type || '').toString().trim() || '유형 없음';
+        const question = (q.question || '').toString().trim();
+        let options = Array.isArray(q.options) ? q.options.map(o => (o ?? '').toString()) : [];
+        let answer = (q.answer ?? '').toString();
+        const explanation = (q.explanation ?? '').toString();
+
+        // 옵션 개수 맞추기(모자라면 빈 보강, 넘치면 4개 자르기)
+        if (options.length < 4) {
+          while (options.length < 4) options.push('');
+        } else if (options.length > 4) {
+          options = options.slice(0, 4);
+        }
+
+        // answer가 options에 없다면 첫 번째로 보정
+        if (!options.includes(answer) && options.length > 0) {
+          answer = options[0];
+        }
+
+        // 질문 한 문장 강제(개행 제거)
+        const oneLineQuestion = question.replace(/\s+/g, ' ').trim();
+
+        return {
+          type,
+          question: oneLineQuestion,
+          options,
+          answer,
+          explanation
+        };
+      });
+    };
+
+    try {
+      quizzes = normalize(quizzes);
+    } catch (e) {
+      console.error('❌ 검증 실패:', e.message);
+      return res.status(500).json({ success: false, message: '퀴즈 스키마 검증에 실패했습니다.' });
     }
 
-    // 4) 저장 후 조회 동일 포맷 반환
+    // 3) 트랜잭션으로 저장 (중복 방지용 유니크 제약을 권장: (study_id, question_index))
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (let i = 0; i < quizzes.length; i++) {
+        const q = quizzes[i];
+        await client.query(
+          `INSERT INTO quiz_set (
+             study_id, question_index, type, question, options, answer, explanation
+           ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+          [
+            studyId,
+            i + 1,
+            q.type,
+            q.question,
+            JSON.stringify(q.options || []),
+            q.answer,
+            q.explanation
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // 4) 저장 후 조회(항상 동일 포맷 반환) — type 포함
     const saved = await pool.query(
-      `SELECT question_index, question, options, answer, explanation
+      `SELECT question_index, type, question, options, answer, explanation
          FROM quiz_set
         WHERE study_id = $1
         ORDER BY question_index`,
@@ -715,6 +837,7 @@ exports.generateQuiz = async (req, res) => {
     );
     const result = saved.rows.map(r => ({
       questionIndex: r.question_index,
+      type: r.type,
       question: r.question,
       options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
       answer: r.answer,
@@ -723,10 +846,151 @@ exports.generateQuiz = async (req, res) => {
 
     return res.json({ success: true, result });
   } catch (err) {
-    console.error('❌ 퀴즈 생성 실패:', err.message);
+    console.error('❌ 퀴즈 생성 실패:', err?.response?.data || err.message);
     res.status(err.status || 500).json({ success: false, message: err.message || '퀴즈 생성 실패' });
   }
 };
+
+// // ──────────────────────────────────────────────────────────────
+// /**
+//  * 7. 퀴즈 생성 (중복이면 기존 반환)
+//  * POST /api/gpt/generate-quiz
+//  *  - ✅ user_id 필수
+//  *  - ✅ study 소유권 검증
+//  */
+// exports.generateQuiz = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+
+//     const { text, studyId } = req.body;
+//     if (!text || !studyId) {
+//       return res.status(400).json({ success: false, message: 'text 또는 studyId가 필요합니다.' });
+//     }
+
+//     await assertStudyOwnerOrThrow(studyId, userId);
+
+//     // 1) 기존 퀴즈 있으면 그대로 반환
+//     const existed = await pool.query(
+//       `SELECT question_index, question, options, answer, explanation
+//          FROM quiz_set
+//         WHERE study_id = $1
+//         ORDER BY question_index`,
+//       [studyId]
+//     );
+//     if (existed.rows.length > 0) {
+//       const quizzes = existed.rows.map(r => ({
+//         questionIndex: r.question_index,
+//         question: r.question,
+//         options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+//         answer: r.answer,
+//         explanation: r.explanation
+//       }));
+//       return res.json({ success: true, result: quizzes });
+//     }
+
+//     // 2) GPT 호출 (기능 동일)
+//     const prompt = `
+//     너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩** 골라,
+//     각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
+
+//     [문제 유형] 1~5 ...
+//     [출력 형식]
+//     [
+//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."},
+//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."},
+//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."}
+//     ]
+
+//     [필수 규칙]
+//     - **오직 위 JSON 배열만** 출력 (설명, 코드블록, 마크다운 금지)
+//     - 각 문제 유형은 서로 달라야 함
+//     - options 정확히 4개
+//     - answer는 options 중 하나
+//     - question은 한 문장
+
+//     원문:
+//     """${text}"""
+//     `;
+
+//     // 가능하면 JSON 강제 (지원되지 않으면 무시됨: 안전)
+//     const payload = {
+//       model: 'gpt-3.5-turbo',          // 사용 중인 모델 유지
+//       messages: [
+//         { role: 'system', content: '당신은 JSON만 출력하는 보조자입니다.' },
+//         { role: 'user', content: prompt }
+//       ],
+//       temperature: 0.2,
+//       max_tokens: 900,
+//       // 최신 OpenAI SDK/엔드포인트에서 지원되는 경우만 적용됨. 미지원이면 자동 무시.
+//       response_format: { type: 'json_object' } // 객체 강제이므로 아래서 배열만 뽑는 후처리 포함
+//     };
+
+//     const gptRes = await axios.post(
+//       'https://api.openai.com/v1/chat/completions',
+//       {
+//         model: 'gpt-3.5-turbo',
+//         messages: [{ role: 'user', content: prompt }],
+//         temperature: 0.7
+//       },
+//       {
+//         headers: {
+//           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+//           'Content-Type': 'application/json'
+//         }
+//       }
+//     );
+
+//     const raw = gptRes.data.choices?.[0]?.message?.content ?? '';
+//     let quizzes;
+//     try {
+//       quizzes = JSON.parse(raw);
+//     } catch (e) {
+//       console.error('❌ GPT 응답 파싱 실패:', raw);
+//       return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.' });
+//     }
+
+//     // 3) DB 저장 (options jsonb)
+//     for (let i = 0; i < quizzes.length; i++) {
+//       const q = quizzes[i];
+//       await pool.query(
+//         `INSERT INTO quiz_set (
+//            study_id, question_index, type, question, options, answer, explanation
+//          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+//         [
+//           studyId,
+//           i + 1,
+//           q.type || '유형 없음',
+//           q.question,
+//           JSON.stringify(q.options || []),
+//           q.answer,
+//           q.explanation
+//         ]
+//       );
+//     }
+
+//     // 4) 저장 후 조회 동일 포맷 반환
+//     const saved = await pool.query(
+//       `SELECT question_index, question, options, answer, explanation
+//          FROM quiz_set
+//         WHERE study_id = $1
+//         ORDER BY question_index`,
+//       [studyId]
+//     );
+//     const result = saved.rows.map(r => ({
+//       questionIndex: r.question_index,
+//       question: r.question,
+//       options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
+//       answer: r.answer,
+//       explanation: r.explanation
+//     }));
+
+//     return res.json({ success: true, result });
+//   } catch (err) {
+//     console.error('❌ 퀴즈 생성 실패:', err.message);
+//     res.status(err.status || 500).json({ success: false, message: err.message || '퀴즈 생성 실패' });
+//   }
+// };
 
 // ──────────────────────────────────────────────────────────────
 /**
