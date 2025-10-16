@@ -75,11 +75,20 @@ critique에는 무엇이 문제였는지 한 줄로 요약.
 
 // (취준생 전용) 스타터(상황+질문)
 const JOB_STARTERS = [
-  { situation: '면접 상황',   question: '본인의 장단점이 무엇인가요?' },
-  { situation: '자기소개서', question: '우리 회사 지원 동기를 3~4문장으로 초안 작성해볼까요?' },
-  { situation: '전화 응대',   question: '면접 일정 조율 전화를 받았을 때, 첫 인사와 핵심 질문을 말로 해보세요.' },
-  { situation: '불합격 대응', question: '불합격 메일을 받았을 때, 스스로를 다독이는 2문장 메시지를 작성해보세요.' },
+  { situation: '면접 상황', question: '본인의 장단점이 무엇인가요?' },
+  { situation: '면접 상황', question: '우리 회사에 지원한 이유는 무엇인가요?' },
+  { situation: '면접 상황', question: '최근에 가장 성취감을 느꼈던 경험에 대해 말씀해보세요.' },
+  { situation: '면접 상황', question: '직장에서 동료와 의견이 충돌했을 때, 어떻게 해결했는지 말씀해보세요.' },
+  { situation: '면접 상황', question: '업무 중 어려운 상황을 극복했던 경험이 있다면 말씀해보세요.' },
+  { situation: '자기소개서', question: '우리 회사 지원 동기를 3~4문장으로 말씀해보세요.' },
+  { situation: '전화 응대', question: '면접 일정 조율 전화를 받았을 때, 첫 인사와 핵심 질문을 말로 해보세요.' }
 ];
+// const JOB_STARTERS = [
+//   { situation: '면접 상황',   question: '본인의 장단점이 무엇인가요?' },
+//   { situation: '자기소개서', question: '우리 회사 지원 동기를 3~4문장으로 말씀해보세요.' },
+//   { situation: '전화 응대',   question: '면접 일정 조율 전화를 받았을 때, 첫 인사와 핵심 질문을 말씀해보세요.' },
+//   //{ situation: '불합격 대응', question: '불합격 메일을 받았을 때, 스스로를 다독이는 2문장 메시지를 작성해보세요.' },
+// ];
 
 function pickJobStarter() {
   return JOB_STARTERS[Math.floor(Math.random() * JOB_STARTERS.length)];
