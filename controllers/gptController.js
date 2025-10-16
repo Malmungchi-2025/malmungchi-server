@@ -209,13 +209,13 @@ exports.generateQuote = async (req, res) => {
     const today = getKstToday();
     const forceRefresh = req.query.refresh === '1';
 
-    // 레벨 결정
+    // ────────── 레벨 결정 ──────────
     const lvQ = await pool.query('SELECT level FROM public.users WHERE id = $1 LIMIT 1', [userId]);
     let userLevel = lvQ.rows[0]?.level ?? 1;
     const bodyLv = Number(req.body?.level);
     if ([1, 2, 3, 4].includes(bodyLv)) userLevel = bodyLv;
 
-    // 이미 있으면 재사용(단, refresh=1이면 새로 생성)
+    // ────────── 이미 존재 시 재사용 ──────────
     if (!forceRefresh) {
       const existed = await pool.query(
         'SELECT study_id, content FROM today_study WHERE date = $1 AND user_id = $2 LIMIT 1',
@@ -231,47 +231,49 @@ exports.generateQuote = async (req, res) => {
       }
     }
 
-    // PM 스펙(480~520자) 레벨 프롬프트
+    // ────────── 프롬프트 개선판 ──────────
     const levelPrompts = {
       1: `20대 사회초년생을 위한 문해력 학습용 글을 작성하세요.
 주제는 문학적이거나 사무적인 내용 중 자유롭게 정해도 좋습니다.
-일상적이고 실무적인 소재(예: 직장, 친구, 일상 습관 등)를 사용하고, 쉬운 단어 위주로 작성하며 너무 길거나 복잡한 문장은 피해주세요.
-어휘: 아주 쉬운 일상 어휘 (예: 금일, 작성, 참조 등 기초 어휘 포함)
+직장, 친구, 일상 습관 등 익숙한 소재를 사용하고, 문장은 너무 길거나 복잡하지 않게 구성하세요.
+어휘: 매우 쉬운 일상 어휘 (예: 금일, 작성, 참조 등 기본 행정·생활 어휘 포함)
 분량: 480~520자
-스타일: 짧고 명확한 문장, 부드럽고 이해하기 쉬운 톤
-오늘만의 포인트(사건/감정/관찰) 1개 포함
-출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+스타일: 짧고 명확한 문장 중심, 따뜻하고 이해하기 쉬운 서술체
+요구사항: 일상 속 사건·감정·관찰 중 하나를 포함해 오늘 하루를 돌아보게 하는 여운이 느껴지도록 작성하세요.
+출력은 본문 텍스트만 (코드블록·머리말·따옴표 금지)`,
+
       2: `20대 사회초년생을 위한 문해력 학습용 글을 작성하세요.
-주제는 문학적이거나 사무적인 내용 중 자유롭게 정하되, 실무나 뉴스, 사회생활과 관련된 문장이면 좋습니다.
-보고서, 공지문, 기사체 문장 톤을 일부 포함하고, 맥락 속에서 어휘를 해석할 수 있도록 자연스럽게 녹여주세요.
-어휘: 쉬운~보통 어휘 (예: 기준, 조치, 보고, 문서 등 활용 어휘 포함)
+주제는 문학적이거나 사무적인 내용 중 자유롭게 정하되, 사회생활·직장·뉴스 등 실무와 연관된 소재가 좋습니다.
+보고서, 공지문, 기사체 톤을 자연스럽게 녹여, 문맥 속에서 단어 의미를 추론할 수 있도록 구성하세요.
+어휘: 쉬운~보통 수준 어휘 (예: 기준, 조치, 보고, 문서 등 실무적 어휘 포함)
 분량: 480~520자
-스타일: 간단한 접속사/부사, 공식적이되 부담스럽지 않음
-오늘만의 포인트(사건/감정/관찰) 1개 포함
-출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+스타일: 짧은 복문과 간단한 접속사/부사 사용, 공식적이되 딱딱하지 않은 톤
+요구사항: 오늘의 사건·감정·관찰 중 하나를 포함하고, 문단 전체가 자연스럽게 흘러가도록 작성하세요.
+출력은 본문 텍스트만 (코드블록·머리말·따옴표 금지)`,
+
       3: `20대 사회초년생의 사고 확장과 표현력 향상을 위한 문해력 학습용 글을 작성하세요.
-주제는 문학적 또는 사무적인 내용 중 자유롭게 선택하되, 논리적 사고나 관점을 담을 수 있는 글이어야 합니다.
-어휘를 활용해 자신의 입장을 설명하거나 관점을 정리하는 문장 포함하고, 원인-결과, 비교, 예시 등 복합 문장을 사용해주세요.
-어휘: 보통 난이도 어휘 (예: 의견, 분석, 의의, 한계, 갈등 등 심화 어휘 포함)
+주제는 문학적 또는 사무적인 내용 중 자유롭게 선택하되, 논리적 사고나 개인의 관점을 담을 수 있어야 합니다.
+원인-결과, 비교, 예시 등의 문장 구조를 적절히 사용하고, 문장이 자연스럽게 이어지도록 구성하세요.
+어휘: 중간 난이도 어휘 (예: 의견, 분석, 의의, 한계, 갈등 등 개념적 어휘 포함)
 분량: 480~520자
-스타일: 복문과 다양한 표현, 조금 더 분석적이고 진지한 톤
-오늘만의 포인트(사건/감정/관찰) 1개 포함
-출력은 본문 텍스트만 (코드블록/머리말 금지)`,
+스타일: 복문과 다양한 연결 표현 사용, 진지하지만 부드러운 서술체
+요구사항: 오늘의 사건·감정·관찰 중 하나를 포함하고, 마지막 문장은 사고를 확장시키는 방향으로 마무리하세요.
+출력은 본문 텍스트만 (코드블록·머리말·따옴표 금지)`,
+
       4: `20대 사회초년생의 성숙한 사고력과 비판적 분석을 돕는 문해력 학습용 글을 작성하세요.
-주제는 하나의 사회적/인문학적 주제에 대한 비판, 통찰, 문제 제기를 담아야 합니다.
-고급 어휘와 추상적 개념 일부(예: 합의, 구조, 담론, 성찰, 관계자 등)를 포함하고, 다소 압축적인 문장 구성과 문장 간 논리 흐름을 강조해주세요.
-독자가 스스로 사고를 이어가도록 유도하는 문장으로 마무리하세요.
-어휘: 약간 높은 난이도 어휘, 고급 수준 어휘 포함
+하나의 사회적·인문학적 주제를 선택하여 비판, 통찰, 혹은 문제 제기를 담아주세요.
+고급 어휘와 추상적 개념(예: 합의, 구조, 담론, 성찰, 관계자 등)을 자연스럽게 녹이고, 문장 간 논리 흐름을 분명히 하세요.
+어휘: 다소 높은 난이도의 어휘, 학습자에게 새로운 개념을 유도하는 수준
 분량: 480~520자
-스타일: 구체적 묘사와 미묘한 뉘앙스, 비판적이되 학습자 친화적인 톤
-오늘만의 포인트(사건/감정/관찰) 1개 포함
-출력은 본문 텍스트만 (코드블록/머리말 금지)`
+스타일: 함축적이지만 유려한 문장 구성, 비판적이되 사려 깊은 톤
+요구사항: 오늘의 사건·감정·관찰 중 하나를 포함하고, 마지막 문장은 독자가 스스로 사고를 이어가도록 여운을 남기세요.
+출력은 본문 텍스트만 (코드블록·머리말·따옴표 금지)`
     };
 
     const topics = ['직장', '일상', '친구', '습관'];
     const seed = Math.floor(Math.random() * 100000);
 
-    // 프롬프트(대화/질문/따옴표 금지)
+    // ────────── 프롬프트 세팅 ──────────
     const sys = {
       role: 'system',
       content: '너는 한국어 글쓰기 교사이자 작가다. 사용자에게 대화하지 말고, 요구한 본문만 정확히 작성한다.'
@@ -288,26 +290,29 @@ exports.generateQuote = async (req, res) => {
       ].join('\n')
     };
 
-    // 생성 + 검증(최대 3회 시도)
+    // ────────── 생성 및 품질 검증 ──────────
     let generatedText = '';
     for (let attempt = 0; attempt < 3; attempt++) {
       const gptRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
-        { model: 'gpt-3.5-turbo', messages: [sys, user], temperature: 0.7 },
+        {
+          model: 'gpt-3.5-turbo',
+          messages: [sys, user],
+          temperature: 0.7
+        },
         { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
       );
+
       generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
-      // 코드펜스 제거
       generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
 
       const badPhrase = /(주제|하시겠어요|원하시면|어떠신가요)/.test(generatedText);
       const hasQuestion = /\?/.test(generatedText);
       const hasQuotes = /["“”'’]/.test(generatedText);
-      const tooShort = generatedText.replace(/\s/g, '').length < 350; // 안전 하한
+      const tooShort = generatedText.replace(/\s/g, '').length < 350;
 
       if (!badPhrase && !hasQuestion && !hasQuotes && !tooShort) break;
 
-      // 마지막 시도면 강제 정제
       if (attempt === 2) {
         generatedText = generatedText
           .replace(/["“”'’]/g, '')
@@ -317,7 +322,7 @@ exports.generateQuote = async (req, res) => {
       }
     }
 
-    // UPSERT 저장
+    // ────────── DB UPSERT ──────────
     const upsert = await pool.query(
       `INSERT INTO today_study (user_id, content, date)
        VALUES ($1, $2, $3)
@@ -327,7 +332,7 @@ exports.generateQuote = async (req, res) => {
     );
     const studyId = upsert.rows[0].study_id;
 
-    // 단어 추출 저장
+    // ────────── 단어 추출 저장 ──────────
     await saveVocabulary(studyId, generatedText);
 
     return res.json({ success: true, result: generatedText, studyId, level: userLevel });
