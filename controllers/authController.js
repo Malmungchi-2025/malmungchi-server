@@ -816,7 +816,7 @@ exports.getMyBadges = async (req, res) => {
       "first_rank": isFirst,
       "rank_1week": false, // 추후 확장 가능
       "rank_1month": false,
-      "rank_100days": rank100Days, // ✅ 추가된 100일 랭킹 배지
+      //"rank_100days": rank100Days, // ✅ 추가된 100일 랭킹 배지
       "bonus_month": days >= 30,
       "early_morning": earlyMorning,
       "five_logins_day": todayCnt >= 5,
