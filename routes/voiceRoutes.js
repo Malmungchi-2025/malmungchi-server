@@ -41,10 +41,10 @@ router.get('/hello', voiceHello);
  *   post:
  *     summary: 음성 대화 (파일 업로드 → STT → GPT → TTS)
  *     description: |
- *       취준생 맞춤 상황 전용. 서버는 항상 job 모드로 동작합니다.
- *       기본 응답은 JSON(+audioBase64). 
- *       헤더 Accept: audio/mpeg 또는 쿼리 ?as=stream 사용 시 MP3 바이너리로 응답.
- *     tags: [Voice]
+        취준생 맞춤 상황 전용. 서버는 항상 job 모드로 동작합니다.
+        기본 응답은 JSON(+audioBase64). 
+        헤더 Accept: audio/mpeg 또는 쿼리 ?as=stream 사용 시 MP3 바이너리로 응답.
+        tags: [Voice]
  *     requestBody:
  *       required: true
  *       content:
