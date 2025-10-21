@@ -782,9 +782,7 @@ exports.getMyBadges = async (req, res) => {
     );
     const todayCnt = parseInt(todayRows[0]?.cnt || 0);
 
-    // === 3️⃣ 랭킹 100일 유지 로직
-    let rank100Days = false;
-
+    
     if (isFirst) {
       const { rows: streakRows } = await pool.query(
         `SELECT rank_streak, first_rank_date FROM users WHERE id = $1`,
