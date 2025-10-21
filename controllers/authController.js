@@ -743,6 +743,21 @@ exports.getMyBadges = async (req, res) => {
     );
     const isFirst = rankRows[0]?.rank === 1;
 
+    // ✅ first_rank_date 보정 로직 추가
+    if (isFirst) {
+      const { rows: firstCheckRows } = await pool.query(
+        `SELECT first_rank_date FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (!firstCheckRows[0]?.first_rank_date) {
+        // 과거에 첫 1등 등록이 안 되어 있었다면 지금 등록
+        await pool.query(
+          `UPDATE users SET first_rank_date = CURRENT_DATE, rank_streak = 1 WHERE id = $1`,
+          [userId]
+        );
+      }
+    }
+
     const { rows: earlyRows } = await pool.query(
       `
       SELECT EXISTS (
