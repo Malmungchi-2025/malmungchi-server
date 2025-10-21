@@ -89,8 +89,8 @@ router.get('/hello', voiceHello);
                       description: "true면 직전 사용자 말풍선 빨간 테두리"
                     critique:
                       type: string
-                      nullable: true
                       description: "간단한 오류/표현 피드백 요약"
+                      nullable: true
                     audioBase64:
                       type: string
                       nullable: true
