@@ -323,4 +323,29 @@ router.get('/me/vocabulary/liked', auth, requireLogin, getMyLikedVocabulary);
 // 단일 스냅샷 저장(히스토리 없이)
 router.post('/me/nickname-test/result', auth, requireLogin, saveNicknameTestIntoUsers);
 
+
+/**
+ * @swagger
+ * /api/auth/me/badges:
+ *   get:
+ *     summary: 사용자 배지 상태 조회 (DB 자동 업데이트 포함)
+ *     description: 활동(출석, 학습, 퀴즈, AI 대화 등)을 기반으로 배지를 계산하고, users.badges 컬럼을 자동 업데이트합니다.
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 성공적으로 배지 상태 반환
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               result:
+ *                 1_week_attendance: true
+ *                 first_lesson: true
+ *                 five_quizzes: false
+ *                 first_ai_chat: true
+ *                 early_morning: false
+ */
+router.get('/me/badges', auth, requireLogin, getMyBadges);
 module.exports = router;

@@ -694,6 +694,86 @@ exports.saveNicknameTestIntoUsers = async (req, res) => {
   }
 };
 
+// GET /api/auth/me/badges
+exports.getMyBadges = async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId)
+    return res.status(401).json({ success: false, message: '인증 필요' });
+
+  try {
+    // === 1️⃣ 현재 상태 계산 (기존 동일)
+    const [{ rows: attendRows }, { rows: studyRows }, { rows: quizRows }, { rows: aiRows }] = await Promise.all([
+      pool.query(`SELECT COUNT(DISTINCT date) AS days FROM today_study WHERE user_id = $1`, [userId]),
+      pool.query(`SELECT COUNT(*) AS cnt FROM today_study WHERE user_id = $1`, [userId]),
+      pool.query(`SELECT COUNT(DISTINCT batch_id) AS cnt FROM quiz_response WHERE user_id = $1`, [userId]),
+      pool.query(`SELECT COUNT(DISTINCT date) AS cnt FROM today_ai_chat WHERE user_id = $1`, [userId]),
+    ]);
+
+    const days = parseInt(attendRows[0]?.days || 0);
+    const studyCnt = parseInt(studyRows[0]?.cnt || 0);
+    const quizCnt = parseInt(quizRows[0]?.cnt || 0);
+    const aiCnt = parseInt(aiRows[0]?.cnt || 0);
+
+    const { rows: rankRows } = await pool.query(`
+      SELECT rank FROM (
+        SELECT id, RANK() OVER (ORDER BY point DESC) AS rank
+        FROM users
+      ) AS sub WHERE id = $1
+    `, [userId]);
+    const isFirst = rankRows[0]?.rank === 1;
+
+    const { rows: earlyRows } = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM today_study
+        WHERE user_id = $1
+          AND date = CURRENT_DATE
+          AND EXTRACT(HOUR FROM created_at) < 6
+      ) AS early
+    `, [userId]);
+    const earlyMorning = earlyRows[0]?.early === true;
+
+    const { rows: todayRows } = await pool.query(`
+      SELECT COUNT(*) AS cnt
+      FROM today_study
+      WHERE user_id = $1
+        AND date = CURRENT_DATE
+    `, [userId]);
+    const todayCnt = parseInt(todayRows[0]?.cnt || 0);
+
+    // === 2️⃣ 계산 결과 (boolean flags)
+    const result = {
+      "1_week_attendance": days >= 7,
+      "1_month_attendance": days >= 30,
+      "100_days_attendance": days >= 100,
+      "first_lesson": studyCnt >= 1,
+      "five_lessons": studyCnt >= 5,
+      "first_quizmunch": quizCnt >= 1,
+      "five_quizzes": quizCnt >= 5,
+      "first_ai_chat": aiCnt >= 1,
+      "five_ai_chats": aiCnt >= 5,
+      "first_rank": isFirst,
+      "rank_1week": false,   // 추후 유지기간 로직 구현
+      "rank_1month": false,
+      "bonus_month": days >= 30,
+      "early_morning": earlyMorning,
+      "five_logins_day": todayCnt >= 5
+    };
+
+    // === 3️⃣ 기존 badges 비교 후 DB 업데이트
+    const { rows: userRows } = await pool.query(`SELECT badges FROM users WHERE id = $1`, [userId]);
+    const prev = (userRows[0]?.badges && typeof userRows[0].badges === 'object')
+      ? userRows[0].badges
+      : {};
+    const updated = { ...prev, ...result };
+
+    await pool.query(`UPDATE users SET badges = $2, updated_at = NOW() WHERE id = $1`, [userId, updated]);
+
+    return res.json({ success: true, result: updated });
+  } catch (e) {
+    console.error('getMyBadges error:', e);
+    return res.status(500).json({ success: false, message: '배지 조회 실패' });
+  }
+};
 
 
 
