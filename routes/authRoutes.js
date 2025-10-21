@@ -4,7 +4,6 @@ const router = express.Router();
 const { sendMail } = require('../utils/mailer'); // ★ 추가
 
 
-// 컨트롤러
 const {
   register,
   login: loginUser,
@@ -18,6 +17,8 @@ const {
   getMyLikedVocabulary,
   saveNicknameTestIntoUsers,
   updateMyAvatar,
+  // ✅ 추가: 배지 조회 API
+  getMyBadges,
 } = require('../controllers/authController');
 
 
