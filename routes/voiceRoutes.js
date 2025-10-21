@@ -41,9 +41,9 @@ router.get('/hello', voiceHello);
  *   post:
  *     summary: 음성 대화 (파일 업로드 → STT → GPT → TTS)
  *     description: |
-        취준생 맞춤 상황 전용. 서버는 항상 job 모드로 동작합니다.
-        기본 응답은 JSON(+audioBase64). 
-        헤더 Accept: audio/mpeg 또는 쿼리 ?as=stream 사용 시 MP3 바이너리로 응답.
+ *       취준생 맞춤 상황 전용. 서버는 항상 job 모드로 동작합니다.
+ *       기본 응답은 JSON(+audioBase64).
+ *       헤더 `Accept: audio/mpeg` 또는 쿼리 `?as=stream` 사용 시 MP3 바이너리로 응답합니다.
  *     tags: [Voice]
  *     requestBody:
  *       required: true
@@ -69,36 +69,38 @@ router.get('/hello', voiceHello);
  *             schema:
  *               type: object
  *               properties:
-                    success:
-                      type: boolean
-                    mode:
-                      type: string
-                      example: "job"
-                    userText:
-                      type: string
-                      description: "STT로 인식된 사용자 발화"
-                    text:
-                      type: string
-                      description: "봇 본문(파란 테두리). 재시도 요청 시 '다시 한 번 해볼까요?'로 시작"
-                    hint:
-                      type: string
-                      nullable: true
-                      description: "TIP 텍스트(있으면 표시)"
-                    needRetry:
-                      type: boolean
-                      description: "true면 직전 사용자 말풍선 빨간 테두리"
-                    critique:
-                      type: string
-                      description: "간단한 오류/표현 피드백 요약"
-                      nullable: true
-                    audioBase64:
-                      type: string
-                      nullable: true
-                    mimeType:
-                      type: string
-                      example: "audio/mpeg"
- *       400: { description: 잘못된 요청 }
- *       500: { description: 서버 오류 }
+ *                 success:
+ *                   type: boolean
+ *                 mode:
+ *                   type: string
+ *                   example: "job"
+ *                 userText:
+ *                   type: string
+ *                   description: STT로 인식된 사용자 발화
+ *                 text:
+ *                   type: string
+ *                   description: 봇 본문(파란 테두리). 재시도 요청 시 '다시 한 번 해볼까요?'로 시작
+ *                 hint:
+ *                   type: string
+ *                   nullable: true
+ *                   description: TIP 텍스트(있으면 표시)
+ *                 needRetry:
+ *                   type: boolean
+ *                   description: true면 직전 사용자 말풍선 빨간 테두리
+ *                 critique:
+ *                   type: string
+ *                   nullable: true
+ *                   description: 간단한 오류/표현 피드백 요약
+ *                 audioBase64:
+ *                   type: string
+ *                   nullable: true
+ *                 mimeType:
+ *                   type: string
+ *                   example: "audio/mpeg"
+ *       400:
+ *         description: 잘못된 요청
+ *       500:
+ *         description: 서버 오류
  */
 router.post('/chat', upload.single('audio'), voiceChat);
 
