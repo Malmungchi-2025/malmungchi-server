@@ -701,12 +701,29 @@ exports.getMyBadges = async (req, res) => {
     return res.status(401).json({ success: false, message: '인증 필요' });
 
   try {
-    // === 1️⃣ 현재 상태 계산 (기존 동일)
-    const [{ rows: attendRows }, { rows: studyRows }, { rows: quizRows }, { rows: aiRows }] = await Promise.all([
-      pool.query(`SELECT COUNT(DISTINCT date) AS days FROM today_study WHERE user_id = $1`, [userId]),
-      pool.query(`SELECT COUNT(*) AS cnt FROM today_study WHERE user_id = $1`, [userId]),
-      pool.query(`SELECT COUNT(DISTINCT batch_id) AS cnt FROM quiz_response WHERE user_id = $1`, [userId]),
-      pool.query(`SELECT COUNT(DISTINCT date) AS cnt FROM today_ai_chat WHERE user_id = $1`, [userId]),
+    // === 1️⃣ 현재 상태 계산
+    const [
+      { rows: attendRows },
+      { rows: studyRows },
+      { rows: quizRows },
+      { rows: aiRows },
+    ] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(DISTINCT date) AS days FROM today_study WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS cnt FROM today_study WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(DISTINCT batch_id) AS cnt FROM quiz_response WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(DISTINCT date) AS cnt FROM today_ai_chat WHERE user_id = $1`,
+        [userId]
+      ),
     ]);
 
     const days = parseInt(attendRows[0]?.days || 0);
@@ -714,33 +731,78 @@ exports.getMyBadges = async (req, res) => {
     const quizCnt = parseInt(quizRows[0]?.cnt || 0);
     const aiCnt = parseInt(aiRows[0]?.cnt || 0);
 
-    const { rows: rankRows } = await pool.query(`
+    // === 2️⃣ 랭킹 및 조조 학습 계산
+    const { rows: rankRows } = await pool.query(
+      `
       SELECT rank FROM (
         SELECT id, RANK() OVER (ORDER BY point DESC) AS rank
         FROM users
       ) AS sub WHERE id = $1
-    `, [userId]);
+    `,
+      [userId]
+    );
     const isFirst = rankRows[0]?.rank === 1;
 
-    const { rows: earlyRows } = await pool.query(`
+    const { rows: earlyRows } = await pool.query(
+      `
       SELECT EXISTS (
         SELECT 1 FROM today_study
         WHERE user_id = $1
           AND date = CURRENT_DATE
           AND EXTRACT(HOUR FROM created_at) < 6
       ) AS early
-    `, [userId]);
+    `,
+      [userId]
+    );
     const earlyMorning = earlyRows[0]?.early === true;
 
-    const { rows: todayRows } = await pool.query(`
+    const { rows: todayRows } = await pool.query(
+      `
       SELECT COUNT(*) AS cnt
       FROM today_study
       WHERE user_id = $1
         AND date = CURRENT_DATE
-    `, [userId]);
+    `,
+      [userId]
+    );
     const todayCnt = parseInt(todayRows[0]?.cnt || 0);
 
-    // === 2️⃣ 계산 결과 (boolean flags)
+    // === 3️⃣ 랭킹 100일 유지 로직
+    let rank100Days = false;
+
+    if (isFirst) {
+      const { rows: streakRows } = await pool.query(
+        `SELECT rank_streak, first_rank_date FROM users WHERE id = $1`,
+        [userId]
+      );
+      const prevStreak = parseInt(streakRows[0]?.rank_streak || 0);
+      const firstRankDate = streakRows[0]?.first_rank_date;
+
+      if (!firstRankDate) {
+        // 첫 1위 달성
+        await pool.query(
+          `UPDATE users SET first_rank_date = CURRENT_DATE, rank_streak = 1 WHERE id = $1`,
+          [userId]
+        );
+      } else {
+        // 연속 유지
+        await pool.query(
+          `UPDATE users SET rank_streak = rank_streak + 1 WHERE id = $1`,
+          [userId]
+        );
+      }
+
+      // 100일 유지 달성 체크
+      if (prevStreak + 1 >= 100) rank100Days = true;
+    } else {
+      // 1위 아님 → streak 초기화
+      await pool.query(
+        `UPDATE users SET rank_streak = 0 WHERE id = $1`,
+        [userId]
+      );
+    }
+
+    // === 4️⃣ 최종 결과 계산
     const result = {
       "1_week_attendance": days >= 7,
       "1_month_attendance": days >= 30,
@@ -752,26 +814,37 @@ exports.getMyBadges = async (req, res) => {
       "first_ai_chat": aiCnt >= 1,
       "five_ai_chats": aiCnt >= 5,
       "first_rank": isFirst,
-      "rank_1week": false,   // 추후 유지기간 로직 구현
+      "rank_1week": false, // 추후 확장 가능
       "rank_1month": false,
+      "rank_100days": rank100Days, // ✅ 추가된 100일 랭킹 배지
       "bonus_month": days >= 30,
       "early_morning": earlyMorning,
-      "five_logins_day": todayCnt >= 5
+      "five_logins_day": todayCnt >= 5,
     };
 
-    // === 3️⃣ 기존 badges 비교 후 DB 업데이트
-    const { rows: userRows } = await pool.query(`SELECT badges FROM users WHERE id = $1`, [userId]);
-    const prev = (userRows[0]?.badges && typeof userRows[0].badges === 'object')
-      ? userRows[0].badges
-      : {};
+    // === 5️⃣ 기존 badges 병합 + 저장
+    const { rows: userRows } = await pool.query(
+      `SELECT badges FROM users WHERE id = $1`,
+      [userId]
+    );
+    const prev =
+      userRows[0]?.badges && typeof userRows[0].badges === "object"
+        ? userRows[0].badges
+        : {};
     const updated = { ...prev, ...result };
 
-    await pool.query(`UPDATE users SET badges = $2, updated_at = NOW() WHERE id = $1`, [userId, updated]);
+    await pool.query(
+      `UPDATE users SET badges = $2, updated_at = NOW() WHERE id = $1`,
+      [userId, updated]
+    );
 
+    // === 6️⃣ 응답
     return res.json({ success: true, result: updated });
   } catch (e) {
-    console.error('getMyBadges error:', e);
-    return res.status(500).json({ success: false, message: '배지 조회 실패' });
+    console.error("getMyBadges error:", e);
+    return res
+      .status(500)
+      .json({ success: false, message: "배지 조회 실패" });
   }
 };
 
