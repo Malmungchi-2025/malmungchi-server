@@ -806,7 +806,7 @@ exports.getMyBadges = async (req, res) => {
       }
 
       // 100일 유지 달성 체크
-      if (prevStreak + 1 >= 100) rank100Days = true;
+      //if (prevStreak + 1 >= 100) rank100Days = true;
     } else {
       // 1위 아님 → streak 초기화
       await pool.query(
