@@ -65,6 +65,8 @@ app.use('/api/voice', voiceRoutes); // 최소 구성
 const gptRoutes = require('./routes/gptRoutes');
 app.use('/api/gpt', gptRoutes);
 
+app.use('/api/study', require('./routes/studyRoutes'));
+
 const { verifySmtp } = require('./utils/mailer');
 verifySmtp(); // 부팅 시 1회
 
