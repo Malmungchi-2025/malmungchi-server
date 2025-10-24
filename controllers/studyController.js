@@ -1,5 +1,39 @@
 const pool = require('../config/db');
 
+// ✅ GET /api/study/progress/:date
+exports.getStudyProgressByDate = async (req, res) => {
+  const userId = req.user?.id;
+  const { date } = req.params;
+
+  if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
+  if (!date) return res.status(400).json({ success: false, message: 'date 파라미터 필요' });
+
+  try {
+    const q = `
+      SELECT progress_step1, progress_step2, progress_step3
+      FROM today_study
+      WHERE user_id = $1 AND date = $2
+      LIMIT 1
+    `;
+    const { rows } = await pool.query(q, [userId, date]);
+
+    if (rows.length === 0) {
+      return res.json({ success: true, progress_level: 0 });
+    }
+
+    const s = rows[0];
+    let level = 0;
+    if (s.progress_step3) level = 3;
+    else if (s.progress_step2) level = 2;
+    else if (s.progress_step1) level = 1;
+
+    return res.json({ success: true, progress_level: level });
+  } catch (e) {
+    console.error('getStudyProgressByDate error:', e);
+    return res.status(500).json({ success: false, message: '조회 실패' });
+  }
+};
+
 // ✅ GET /api/study/progress/week/:date
 exports.getStudyProgressByWeek = async (req, res) => {
   const userId = req.user?.id;
