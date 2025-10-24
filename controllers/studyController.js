@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
-// ✅ GET /api/study/progress/:date
-exports.getStudyProgressByDate = async (req, res) => {
+// ✅ GET /api/study/progress/week/:date
+exports.getStudyProgressByWeek = async (req, res) => {
   const userId = req.user?.id;
   const { date } = req.params;
 
@@ -9,27 +9,54 @@ exports.getStudyProgressByDate = async (req, res) => {
   if (!date) return res.status(400).json({ success: false, message: 'date 파라미터 필요' });
 
   try {
-    const q = `
-      SELECT progress_step1, progress_step2, progress_step3
-      FROM today_study
-      WHERE user_id = $1 AND date = $2
-      LIMIT 1
-    `;
-    const { rows } = await pool.query(q, [userId, date]);
+    // 🗓️ 기준 날짜 계산
+    const baseDate = new Date(date);
+    const monday = new Date(baseDate);
+    monday.setDate(baseDate.getDate() - baseDate.getDay() + 1); // 월요일
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
 
-    if (rows.length === 0) {
-      return res.json({ success: true, progress_level: 0 });
+    // 📅 한 달 제한 (현재 날짜 기준 30일 이전까지만)
+    const now = new Date();
+    const limit = new Date();
+    limit.setDate(now.getDate() - 30);
+    if (monday < limit) {
+      return res.status(403).json({ 
+        success: false, 
+        message: '한 달 이전의 학습 내역은 조회할 수 없습니다.' 
+      });
     }
 
-    const s = rows[0];
-    let level = 0;
-    if (s.progress_step3) level = 3;
-    else if (s.progress_step2) level = 2;
-    else if (s.progress_step1) level = 1;
+    // 🧠 이번 주 전체 조회
+    const q = `
+      SELECT date, progress_step1, progress_step2, progress_step3
+      FROM today_study
+      WHERE user_id = $1
+        AND date BETWEEN $2 AND $3
+      ORDER BY date ASC;
+    `;
+    const { rows } = await pool.query(q, [userId, monday, sunday]);
 
-    return res.json({ success: true, progress_level: level });
+    // 📊 날짜별 학습 단계 매핑
+    const progressMap = {};
+    for (let i = 0; i < 7; i++) {
+      const cur = new Date(monday);
+      cur.setDate(monday.getDate() + i);
+      const key = cur.toISOString().slice(0, 10);
+      progressMap[key] = 0; // 기본값 0
+    }
+
+    rows.forEach(r => {
+      let level = 0;
+      if (r.progress_step3) level = 3;
+      else if (r.progress_step2) level = 2;
+      else if (r.progress_step1) level = 1;
+      progressMap[r.date.toISOString().slice(0, 10)] = level;
+    });
+
+    return res.json({ success: true, progress_map: progressMap });
   } catch (e) {
-    console.error('getStudyProgressByDate error:', e);
+    console.error('getStudyProgressByWeek error:', e);
     return res.status(500).json({ success: false, message: '조회 실패' });
   }
 };
