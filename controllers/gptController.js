@@ -322,8 +322,7 @@ exports.generateQuote = async (req, res) => {
     //   }
     // }
 
-    // ────────── ✅ 테스트용 고정 글감 ──────────
-const generatedText = `열역학 제1법칙은 아래와 같이 표현이 된다. "어떤 계의 내부 에너지의 증가량은 계에 더해진 열에너지에서 계가 외부에 해준 일을 뺀 양과 같다."  열의 이동에 따라 계 내부의 에너지가 변하는데 이때 열에너지 또한 변한다. 이 에너지는 계 내부의 원자•분자의 역학적 에너지 등을 일컫는다. 일반적으로, 어떤 체계에 외부로부터 어떤 에너지가 가해지면 그만큼 체계의 에너지가 증가한다.  이와 같이, 물체에 열을 가하면 그 물체의 내부 에너지가 가해진 열에너지만큼 증가한다. 또한 물체에 역학적인 일이 더해져도 역시 내부 에너지는 더해진 일의 양만큼 증가한다. 따라서 물체에 열과 일이 동시에 가해졌을 때 물체의 내부 에너지는 가해진 열과 일의 양만큼 증가한다. 이것을 열역학의 제1법칙이라고 한다. 열역학 제1법칙에 의하면 에너지는 형태가 변할 수 있을 뿐 새로 만들어지거나 없어질 수 없다. 우주의 에너지 총량은 시간이 시작된 때로부터 종말에 이르기까지 일정하게 고정되어 있다. 즉 일정량의 열을 일로 바꾸었을 때 그 열은 소멸된 것이 아니라 다른 장소로 이동하였거나 다른 형태의 에너지로 바뀌었을 뿐이다. 에너지는 새로 창조되거나 소멸될 수 없고 단지 한 형태로부터 다른 형태로 변환될 뿐이다. 즉, 열역학 제1법칙은 보다 일반화된 에너지 보존의 법칙의 표현이다.`;
+    
 
     // ────────── DB UPSERT ──────────
     const upsert = await pool.query(
@@ -2097,7 +2096,36 @@ exports.createOrGetBatch = async (req, res) => {
 
       // ✅ 필요한 만큼만 해설 보강 (네트워크 호출 최소화)
       items = await ensureExplanations(items);
-      
+
+      //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!!
+      const mcqPattern = [4, 2, 1, 3]; // 1-based index
+      let mcqCount = 0;
+      let oxCount = 0;
+
+      for (const it of items) {
+        if (it.type === 'MCQ' && Array.isArray(it.options) && it.options.length >= 4) {
+          const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
+          mcqCount++;
+
+          // 정답이 항상 해당 위치로 오도록 options 재배열
+          const correct = it.options[it.correct_option_id - 1] || it.options[0];
+          const others = it.options.filter((_, i) => i !== (it.correct_option_id - 1));
+
+          // 안전하게 shuffle 하지 않고 정답만 위치 교체
+          const fixedOptions = [...others];
+          fixedOptions.splice(correctIdx, 0, correct);
+
+          it.options = fixedOptions;
+          it.correct_option_id = correctIdx + 1; // 1-based
+        }
+
+        // OX 순서 고정: 첫 번째는 O가 정답, 두 번째는 X
+        else if (it.type === 'OX') {
+          it.answer_is_o = oxCount % 2 === 0; // 0→O, 1→X
+          oxCount++;
+        }
+      }
+            
 
     // 2) 항상 새 배치 생성
     const ins = await client.query(
