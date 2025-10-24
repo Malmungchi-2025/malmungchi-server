@@ -88,7 +88,13 @@ exports.getStudyProgressByWeek = async (req, res) => {
       progressMap[r.date.toISOString().slice(0, 10)] = level;
     });
 
-    return res.json({ success: true, progress_map: progressMap });
+    // ✅ BaseResponse 규격으로 응답
+    return res.json({
+      success: true,
+      result: { progress_map: progressMap }
+    });
+
+    //return res.json({ success: true, progress_map: progressMap });
   } catch (e) {
     console.error('getStudyProgressByWeek error:', e);
     return res.status(500).json({ success: false, message: '조회 실패' });
