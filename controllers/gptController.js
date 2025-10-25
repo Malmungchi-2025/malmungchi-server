@@ -2157,34 +2157,35 @@ exports.createOrGetBatch = async (req, res) => {
       items = await ensureExplanations(items);
 
       //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!!
-      const mcqPattern = [4, 2, 1, 3]; // 1-based index
+      const mcqPattern = [4, 2, 1]; // 1-based
       let mcqCount = 0;
       let oxCount = 0;
 
       for (const it of items) {
+        // 4지선다 (MCQ)
         if (it.type === 'MCQ' && Array.isArray(it.options) && it.options.length >= 4) {
           const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
           mcqCount++;
 
-          // 정답이 항상 해당 위치로 오도록 options 재배열
           const correct = it.options[it.correct_option_id - 1] || it.options[0];
           const others = it.options.filter((_, i) => i !== (it.correct_option_id - 1));
 
-          // 안전하게 shuffle 하지 않고 정답만 위치 교체
+          // 정답이 항상 지정된 위치로 가도록 삽입
           const fixedOptions = [...others];
           fixedOptions.splice(correctIdx, 0, correct);
 
           it.options = fixedOptions;
-          it.correct_option_id = correctIdx + 1; // 1-based
+          it.correct_option_id = correctIdx + 1; // 1-based index로 저장
         }
 
-        // OX 순서 고정: 첫 번째는 O가 정답, 두 번째는 X
+        // OX (순서: 첫 번째 → O, 두 번째 → X)
         else if (it.type === 'OX') {
-          it.answer_is_o = oxCount % 2 === 0; // 0→O, 1→X
+          it.answer_is_o = (oxCount % 2 === 0); // 첫 번째 true, 두 번째 false
           oxCount++;
         }
-      }
-            
+
+        // SHORT (단답형)은 변경 없음
+      }    
 
     // 2) 항상 새 배치 생성
     const ins = await client.query(
