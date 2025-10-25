@@ -2157,35 +2157,36 @@ exports.createOrGetBatch = async (req, res) => {
       items = await ensureExplanations(items);
 
       //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!!
-      const mcqPattern = [4, 2, 1]; // 1-based
+      const mcqPattern = [4, 2, 1];
       let mcqCount = 0;
       let oxCount = 0;
 
       for (const it of items) {
-        // 4지선다 (MCQ)
         if (it.type === 'MCQ' && Array.isArray(it.options) && it.options.length >= 4) {
           const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
           mcqCount++;
 
-          const correct = it.options[it.correct_option_id - 1] || it.options[0];
-          const others = it.options.filter((_, i) => i !== (it.correct_option_id - 1));
+          // ✅ 정답 보기를 "id" 기반으로 안전하게 찾아옴
+          const correct = it.options.find(o => o.id === it.correct_option_id) || it.options[0];
 
-          // 정답이 항상 지정된 위치로 가도록 삽입
+          // 기존 정답을 제외한 나머지 보기들
+          const others = it.options.filter(o => o.id !== it.correct_option_id);
+
+          // 정답을 원하는 위치에 삽입
           const fixedOptions = [...others];
           fixedOptions.splice(correctIdx, 0, correct);
 
+          // 새 배열로 교체
           it.options = fixedOptions;
-          it.correct_option_id = correctIdx + 1; // 1-based index로 저장
+          it.correct_option_id = correctIdx + 1; // 1-based
         }
 
-        // OX (순서: 첫 번째 → O, 두 번째 → X)
+        // ✅ OX 순서 고정: 첫 번째 O, 두 번째 X
         else if (it.type === 'OX') {
-          it.answer_is_o = (oxCount % 2 === 0); // 첫 번째 true, 두 번째 false
+          it.answer_is_o = (oxCount % 2 === 0);
           oxCount++;
         }
-
-        // SHORT (단답형)은 변경 없음
-      }    
+      }  
 
     // 2) 항상 새 배치 생성
     const ins = await client.query(
