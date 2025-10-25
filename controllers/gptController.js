@@ -458,6 +458,36 @@ exports.generateQuote = async (req, res) => {
 //   }
 // };
 
+// // ──────────────────────────────────────────────────────────────
+// /**
+//  * 2. 단어 검색 (GPT, DB 저장 없음)
+//  * POST /api/vocabulary/search
+//  *  - user_id 불필요 (검색만)
+//  */
+// exports.searchWordDefinition = async (req, res) => {
+//   const { word } = req.body;
+//   if (!word) return res.status(400).json({ success: false, message: '단어 필요' });
+
+//   try {
+//     const prompt = `"${word}"의 국립국어원 기준 정의와 예문을 JSON으로 반환해줘. {"word":"","meaning":"","example":""} 형식으로.`;
+
+//     const gptRes = await axios.post(
+//       'https://api.openai.com/v1/chat/completions',
+//       {
+//         model: 'gpt-3.5-turbo',
+//         messages: [{ role: 'user', content: prompt }],
+//       },
+//       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+//     );
+
+//     const result = JSON.parse(gptRes.data.choices[0].message.content);
+//     res.json({ success: true, result });
+//   } catch (err) {
+//     console.error(err.message);
+//     return replyOpenAIError(res, err, 'GPT API 오류');
+//   }
+// };
+
 // ──────────────────────────────────────────────────────────────
 /**
  * 2. 단어 검색 (GPT, DB 저장 없음)
@@ -469,7 +499,7 @@ exports.searchWordDefinition = async (req, res) => {
   if (!word) return res.status(400).json({ success: false, message: '단어 필요' });
 
   try {
-    const prompt = `"${word}"의 국립국어원 기준 정의와 예문을 JSON으로 반환해줘. {"word":"","meaning":"","example":""} 형식으로.`;
+    const prompt = `"${word}"의 국립국어원 기준 정의와 예문을 JSON으로 반환해줘. {"word":"","meaning":"","example":""} 형식으로.`
 
     const gptRes = await axios.post(
       'https://api.openai.com/v1/chat/completions',
@@ -480,8 +510,22 @@ exports.searchWordDefinition = async (req, res) => {
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
 
-    const result = JSON.parse(gptRes.data.choices[0].message.content);
-    res.json({ success: true, result });
+    // GPT 응답 파싱
+    let parsed = JSON.parse(gptRes.data.choices[0].message.content);
+
+    // ✅ 항상 배열 형태로 통일
+    if (!Array.isArray(parsed)) {
+      parsed = [parsed];
+    }
+
+    // ✅ 각 요소가 {word, meaning, example} 형태인지 검증 (옵션)
+    const cleaned = parsed.map(item => ({
+      word: item.word ?? word,
+      meaning: item.meaning ?? '',
+      example: item.example ?? ''
+    }));
+
+    res.json({ success: true, result: cleaned });
   } catch (err) {
     console.error(err.message);
     return replyOpenAIError(res, err, 'GPT API 오류');
