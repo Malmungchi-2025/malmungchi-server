@@ -2167,19 +2167,19 @@ exports.createOrGetBatch = async (req, res) => {
           mcqCount++;
 
           // ✅ 정답 보기를 "id" 기반으로 안전하게 찾아옴
-          const correct = it.options.find(o => o.id === it.correct_option_id) || it.options[0];
+          console.log('[MCQ before fix]', it.text, it.options.map(o => o.label), '정답ID:', it.correct_option_id);
 
-          // 기존 정답을 제외한 나머지 보기들
-          const others = it.options.filter(o => o.id !== it.correct_option_id);
-
-          // 정답을 원하는 위치에 삽입
+          const correct = it.options[it.correct_option_id - 1] || it.options[0]; // 배열 index로 직접 접근
+          const others = it.options.filter((_, i) => i !== it.correct_option_id - 1);
           const fixedOptions = [...others];
           fixedOptions.splice(correctIdx, 0, correct);
 
-          // 새 배열로 교체
-          it.options = fixedOptions;
-          it.correct_option_id = correctIdx + 1; // 1-based
-        }
+          // 보기 ID 다시 1~n으로 재부여 (정렬 후 혼선 방지)
+          it.options = fixedOptions.map((o, i) => ({ id: i + 1, label: o.label }));
+          it.correct_option_id = correctIdx + 1;
+
+          console.log('[MCQ after fix]', it.text, it.options.map(o => o.label), '최종 정답:', it.correct_option_id)
+                  }
 
         // ✅ OX 순서 고정: 첫 번째 O, 두 번째 X
         else if (it.type === 'OX') {
