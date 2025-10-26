@@ -2166,6 +2166,90 @@ async function ensureExplanations(items) {
   return items;
 }
 
+// ──────────────────────────────────────────────
+// ✅ (NEW) 문제 순서·정답 순서 고정 버전 normalizeItems
+// ──────────────────────────────────────────────
+function normalizeItemsFixed(rawItems) {
+  const items = [];
+  let mcq = 0, ox = 0, shortx = 0;
+  const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ').normalize('NFC');
+
+  for (const it of rawItems) {
+    const t = String(it.type || '').toUpperCase();
+    const qText = String(it.question || it.statement || '').trim();
+
+    // 1️⃣ MCQ (4지선다형) — 정답 항상 4번으로 고정
+    if (Array.isArray(it.options) && it.options.length >= 4 && mcq < 3) {
+      const opts = it.options.map((o, i) => {
+        const label = typeof o === 'string' ? o : (o?.label ?? o?.text ?? '');
+        return { id: i + 1, label: String(label) };
+      });
+
+      // 정답 항상 마지막 보기(4번)
+      const fixedOptions = [
+        ...opts.slice(0, 3),
+        opts[opts.length - 1] ?? { id: 4, label: String(it.answer || '정답') }
+      ].map((o, idx) => ({ id: idx + 1, label: o.label }));
+
+      items.push({
+        type: 'MCQ',
+        text: qText,
+        options: fixedOptions,
+        correct_option_id: 4, // 항상 4번
+        explanation: sanitizeExplanation(it.explanation, {
+          type: 'MCQ',
+          answer: fixedOptions[3].label,
+          options: fixedOptions.map(o => o.label)
+        })
+      });
+      mcq++;
+      continue;
+    }
+
+    // 2️⃣ OX — 첫 번째는 O, 두 번째는 X로 강제
+    if (looksLikeOX(it) && ox < 2) {
+      const isO = ox === 0; // 첫 번째 true(O), 두 번째 false(X)
+      items.push({
+        type: 'OX',
+        statement: qText,
+        answer_is_o: isO,
+        explanation: sanitizeExplanation(it.explanation, {
+          type: 'OX',
+          answer: isO ? 'O' : 'X'
+        })
+      });
+      ox++;
+      continue;
+    }
+
+    // 3️⃣ SHORT — 마지막 두 문제로 채우기
+    if ((t.includes('단답') || t.includes('SHORT')) && shortx < 2) {
+      items.push({
+        type: 'SHORT',
+        guide: String(it.guide || '밑줄 친(또는 문맥상) 단어를 적절히 바꿔 쓰세요.'),
+        sentence: qText,
+        underline_text: it.underline_text ?? null,
+        answer_text: String(it.answer || '').trim(),
+        explanation: sanitizeExplanation(it.explanation, {
+          type: 'SHORT',
+          answer: it.answer
+        })
+      });
+      shortx++;
+      continue;
+    }
+  }
+
+  // ✅ 고정 순서: 4지선다(3) → OX(2) → 단답형(2)
+  const ordered = [
+    ...items.filter(i => i.type === 'MCQ').slice(0, 3),
+    ...items.filter(i => i.type === 'OX').slice(0, 2),
+    ...items.filter(i => i.type === 'SHORT').slice(0, 2)
+  ];
+
+  return ordered.slice(0, 7);
+}
+
 // POST /api/gpt/quiz
 // body: { category: '취업준비'|'기초'|'활용'|'심화'|'고급', len?: number }
 // req.user.id 가 있다고 가정(미들웨어에서 주입)
@@ -2188,7 +2272,8 @@ exports.createOrGetBatch = async (req, res) => {
     const prompt = buildPrompt({ categoryKor, len });
 
     let raw = await generateQuizArray(prompt);
-    let items = normalizeItems(raw);
+    //let items = normalizeItems(raw);
+    let items = normalizeItemsFixed(raw);
 
     
     // 해설 비어있는 문항 보강 생성
@@ -2198,7 +2283,8 @@ exports.createOrGetBatch = async (req, res) => {
     while (items.length < 7 && retries < 2) {
       retries++;
       raw = await generateQuizArray(prompt);
-      const more = normalizeItems(raw);
+      // const more = normalizeItems(raw);
+      const more = normalizeItemsFixed(raw);
       // 타입별 부족분 채워넣기
       const need = 7 - items.length;
       for (const it of more) {
