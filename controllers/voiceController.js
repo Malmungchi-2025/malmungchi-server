@@ -146,7 +146,13 @@ exports.getVoicePrompt = async (_req, res) => {
 exports.voiceHello = async (req, res) => {
   try {
     const mode = 'job';
-    const starter = pickJobStarter(); // { situation, question }
+
+    // 🔒 발표용 고정 질문
+    // const starter = pickJobStarter(); // ← 랜덤 호출 주석처리
+    const starter = {
+      situation: '면접 상황',
+      question: '직장에서 동료와 의견이 충돌했을 때, 어떻게 해결했는지 말씀해보세요.'
+    };
 
     // 화면표시용 전체 문장(=TTS용)
     const fullText = `[${starter.situation}]\n: ${starter.question}`;
@@ -181,7 +187,51 @@ exports.voiceHello = async (req, res) => {
     logTtsError('voiceHello', err);
     return res.status(500).json({ success:false, message:'voiceHello 실패', hint: err?.message });
   }
-};
+}; //여기 추후 밑에 주석 부분으로 변경하기!
+
+// /* =========================================================
+//  * D. 서버가 먼저 상황+질문 제공 (텍스트+TTS) — 취준생 전용
+//  * GET /api/voice/hello?as=stream
+//  * ========================================================= */
+// exports.voiceHello = async (req, res) => {
+//   try {
+//     const mode = 'job';
+//     const starter = pickJobStarter(); // { situation, question }
+
+//     // 화면표시용 전체 문장(=TTS용)
+//     const fullText = `[${starter.situation}]\n: ${starter.question}`;
+
+//     // TTS
+//     const [ttsResp] = await ttsClient.synthesizeSpeech({
+//       input: { text: fullText },
+//       voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
+//       audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0 }
+//     });
+//     const mp3Buffer = Buffer.from(ttsResp.audioContent);
+
+//     // JSON으로 돌려줄 때: 상황/질문/전체문장/오디오 모두 포함
+//     if (!(req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg'))) {
+//       return res.json({
+//         success: true,
+//         mode,
+//         situation: starter.situation,     // ✅ 프론트: 태그(칩/작은 말풍선)
+//         question:  starter.question,      // ✅ 프론트: 큰 말풍선(회색)
+//         text:      fullText,              // (필요하면 사용)
+//         audioBase64: mp3Buffer.toString('base64'),
+//         mimeType: 'audio/mpeg'
+//       });
+//     }
+
+//     // 스트리밍으로 달라고 하면 오디오만
+//     res.setHeader('Content-Type', 'audio/mpeg');
+//     res.setHeader('Content-Length', mp3Buffer.length);
+//     return res.end(mp3Buffer);
+
+//   } catch (err) {
+//     logTtsError('voiceHello', err);
+//     return res.status(500).json({ success:false, message:'voiceHello 실패', hint: err?.message });
+//   }
+// };
 
 /* =========================================================
  * E. STT → GPT(JSON) → TTS — 취준생 전용
