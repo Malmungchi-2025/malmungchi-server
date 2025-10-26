@@ -666,7 +666,7 @@ router.post('/quiz/attempt/reward', gptController.giveQuizAttemptPoint);
  *       401: { description: 인증 필요 }
  *       500: { description: 서버 오류 }
  */
-router.post('/gpt/ai-chat/touch-today', gptController.touchTodayAiChat);
+router.post('/ai-chat/touch-today', gptController.touchTodayAiChat);
 
 /**
  * @swagger
@@ -690,7 +690,7 @@ router.post('/gpt/ai-chat/touch-today', gptController.touchTodayAiChat);
  *       401: { description: 인증 필요 }
  *       500: { description: 서버 오류 }
  */
-router.post('/gpt/ai-chat/complete-reward', gptController.giveAiChatDailyReward);
+router.post('/ai-chat/complete-reward', gptController.giveAiChatDailyReward);
 
 
 /**
