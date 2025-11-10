@@ -2,7 +2,7 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 
-// 토큰 파싱 + 유저 주입
+// 토큰 파싱 + 유저 주입 기능 (윤지/감자)
 async function auth(req, _res, next) {
   try {
     const h = req.headers['authorization'] || '';
@@ -27,7 +27,7 @@ async function auth(req, _res, next) {
   next();
 }
 
-// ✅ 여기서 포맷 통일: { success: false, ... }
+// 여기서 포맷 통일: { success: false, ... }
 function requireLogin(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });

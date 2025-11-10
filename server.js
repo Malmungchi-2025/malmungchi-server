@@ -1,10 +1,10 @@
 //server.js
 const dotenv = require("dotenv");
-dotenv.config(); // ✅ 최상단에서 가장 먼저 실행
+dotenv.config(); // 최상단에서 가장 먼저 실행
 const fs = require("fs");
 const path = require("path");
 
-// ✅ Google TTS Base64 → JSON 복원
+// Google TTS Base64 → JSON 복원 ai 대화(윤지/감자)
 (function restoreGoogleKeyFromEnv() {
   const b64 = process.env.GOOGLE_TTS_JSON_BASE64;
   if (!b64) {
@@ -64,7 +64,9 @@ app.use("/api/gpt", gptRoutes);
 
 app.use("/api/study", require("./routes/studyRoutes"));
 
-// ✅ Web Routes Import
+//------------ 여기까지 윤지 -----------------//
+
+// Web Routes Import -> (예원/도토)
 const webPromptRoutes = require("./routes/web/promptRoutes");
 const webGrammarRoutes = require("./routes/web/grammarRoutes");
 const webWritingRoutes = require("./routes/web/writingRoutes");
@@ -74,7 +76,7 @@ const webTranscriptionRoutes = require("./routes/web/transcriptionRoutes");
 const webLikeRoutes = require("./routes/web/likeRoutes");
 const webScrapRoutes = require("./routes/web/scrapRoutes");
 
-// ✅ Web Routes 연결
+//  Web Routes 연결  -> (예원/도토)
 app.use("/api/prompts", webPromptRoutes);
 app.use("/api/grammar", webGrammarRoutes);
 app.use("/api/writings", webWritingRoutes);
@@ -87,24 +89,24 @@ app.use("/api/scraps", webScrapRoutes);
 const { verifySmtp } = require("./utils/mailer");
 verifySmtp(); // 부팅 시 1회
 
-// ✅ DB 초기화 함수
+//  DB 초기화 함수
 async function initializeDB() {
   try {
     const initSql = fs
       .readFileSync(path.join(__dirname, "init.sql"))
       .toString();
     await pool.query(initSql);
-    console.log("✅ Render DB 초기화 완료");
+    console.log("Render DB 초기화 완료");
   } catch (err) {
     console.error("❌ DB 초기화 실패:", err.message);
   }
 }
 
-// ✅ 먼저 DB 초기화 실행
+//  먼저 DB 초기화 실행(윤지, 예원 공통)
 initializeDB().then(() => {
   const PORT = process.env.PORT || 3443;
   http.createServer(app).listen(PORT, () => {
-    console.log(`✅ HTTP 서버 실행 중: http://localhost:${PORT}`);
-    console.log(`📄 Swagger UI: http://localhost:${PORT}/api-docs`);
+    console.log(` HTTP 서버 실행 중: http://localhost:${PORT}`);
+    console.log(` Swagger UI: http://localhost:${PORT}/api-docs`);
   });
 });

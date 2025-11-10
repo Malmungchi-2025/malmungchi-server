@@ -1,4 +1,6 @@
 // controllers/friendController.js
+// 친구 기능 컨트롤러.
+// 앱 : 나와 친구 맺거나, 친구 목록을 보여줄 수 있는 api 구현.(윤지/감자)
 const pool = require('../config/db');
 
 // POST /api/friends/by-code
