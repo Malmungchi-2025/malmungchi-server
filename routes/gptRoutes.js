@@ -1,10 +1,11 @@
 // routes/gptRoutes.js
+// gpt api를 이용하는 모든 api 라우터..(윤지/감자)
 const express = require('express');
 const router = express.Router();
 
 const gptController = require('../controllers/gptController');
 
-// ✅ JWT 파싱 + 로그인 강제 미들웨어 (프로젝트에 맞게 import)
+// JWT 파싱 + 로그인 강제 미들웨어 (프로젝트에 맞게 import)
 // 예시 1) 하나로 합쳐진 미들웨어인 경우:
 // const requireLogin = require('../middleware/requireLogin');
 
@@ -13,7 +14,7 @@ const { auth, requireLogin } = require('../middlewares/auth');
 // const auth = require('../middlewares/auth');              // req.user 채우기
 // const { requireLogin } = require('../middlewares/authGuard'); // 401 처리
 
-// 🔒 이하 모든 GPT/Study/Vocabulary/Quiz API는 로그인 필수
+// 이하 모든 GPT/Study/Vocabulary/Quiz API는 로그인 필수
 router.use(auth, requireLogin);
 
 

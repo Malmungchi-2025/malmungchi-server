@@ -1,7 +1,8 @@
 // routes/authRoutes.js
+//auth 라우터, 스웨거를 통해 프론트에게 api 명세서 제공함. (윤지/감자)
 const express = require('express');
 const router = express.Router();
-const { sendMail } = require('../utils/mailer'); // ★ 추가
+const { sendMail } = require('../utils/mailer'); 
 
 
 const {
@@ -10,22 +11,21 @@ const {
   verifyEmail,
   resendVerification,
   me,
-  // ✅ 추가: 단어 목록 API
+  // 추가: 단어 목록 API
   getMyRecentVocabulary,
   getMyVocabulary,
   toggleMyVocabularyLike,
   getMyLikedVocabulary,
   saveNicknameTestIntoUsers,
   updateMyAvatar,
-  // ✅ 추가: 배지 조회 API
   getMyBadges,
 } = require('../controllers/authController');
 
 
 // 미들웨어 (폴더명이 middlewares 라서 경로 주의!)
 const { auth, requireLogin } = require('../middlewares/auth');
-// const auth = require('../middlewares/auth');                    // ✅ 기본 내보내기(함수)
-//const { requireLogin } = require('../middlewares/authGuard');   // ✅ named export
+// const auth = require('../middlewares/auth');                    //  기본 내보내기(함수)
+//const { requireLogin } = require('../middlewares/authGuard');   //  named export
 
 // 예: 보호된 라우트
 //router.post('/your-protected-endpoint', auth, requireLogin, controllerFn);
@@ -176,7 +176,7 @@ router.post('/login', loginUser);
  *       401:
  *         description: 인증 필요
  */
-router.patch('/me/avatar', auth, requireLogin, updateMyAvatar); // ✅ 상대경로+보호 미들웨어
+router.patch('/me/avatar', auth, requireLogin, updateMyAvatar); //  상대경로+보호 미들웨어
 
 /**
  * @swagger

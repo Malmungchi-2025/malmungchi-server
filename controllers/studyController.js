@@ -1,6 +1,8 @@
 const pool = require('../config/db');
+// 스터디(오늘의 학습) 기능 컨트롤러.
+// 앱 : 내가 학습한 스터디 목록, 스터디 내용, 스터디 날짜 확인 api 구현.(윤지/감자)
 
-// ✅ GET /api/study/progress/:date
+//  GET /api/study/progress/:date
 exports.getStudyProgressByDate = async (req, res) => {
   const userId = req.user?.id;
   const { date } = req.params;
@@ -34,7 +36,7 @@ exports.getStudyProgressByDate = async (req, res) => {
   }
 };
 
-// ✅ GET /api/study/progress/week/:date
+// GET /api/study/progress/week/:date
 exports.getStudyProgressByWeek = async (req, res) => {
   const userId = req.user?.id;
   const { date } = req.params;
@@ -88,7 +90,7 @@ exports.getStudyProgressByWeek = async (req, res) => {
       progressMap[r.date.toISOString().slice(0, 10)] = level;
     });
 
-    // ✅ BaseResponse 규격으로 응답
+    //  BaseResponse 규격으로 응답
     return res.json({
       success: true,
       result: { progress_map: progressMap }
@@ -101,7 +103,7 @@ exports.getStudyProgressByWeek = async (req, res) => {
   }
 };
 
-// ✅ PATCH /api/study/progress
+//  PATCH /api/study/progress -> 오늘의 학습 첫 페이지에 학습한 퍼센트 볼 수 있는 기능 제공함.
 // body: { date: "2025-10-24", step: 1|2|3 }
 exports.updateStudyProgress = async (req, res) => {
   const userId = req.user?.id;

@@ -17,7 +17,7 @@ router.get('/test-mail', async (req, res) => {
 });
 
 module.exports = router; 
-//메일 테스트용.
+//메일 테스트용 라우터(윤지/감자)
 
 const testRoutes = require('./routes/testRoutes');
 app.use('/test', testRoutes);
