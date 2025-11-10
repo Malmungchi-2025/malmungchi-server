@@ -274,80 +274,79 @@ exports.generateQuote = async (req, res) => {
     const seed = Math.floor(Math.random() * 100000);
 
     
-// ────────── 🔧 고정 글감 삽입 (GPT 대신 사용) ──────────
-    let generatedText = `
-    열역학 제1법칙은 다음과 같이 표현된다.
-    "어떤 계의 내부 에너지의 증가량은 계에 더해진 열에너지에서 계가 외부에 해준 일을 뺀 양과 같다."
-    열의 이동에 따라 계 내부의 에너지가 변하는데, 이때 열에너지 또한 변한다.
-    이 에너지는 계 내부의 원자·분자의 역학적 에너지를 일컫는다.
+// // ────────── 🔧 고정 글감 삽입 (GPT 대신 사용) ──────────
+//     let generatedText = `
+//     열역학 제1법칙은 다음과 같이 표현된다.
+//     "어떤 계의 내부 에너지의 증가량은 계에 더해진 열에너지에서 계가 외부에 해준 일을 뺀 양과 같다."
+//     열의 이동에 따라 계 내부의 에너지가 변하는데, 이때 열에너지 또한 변한다.
+//     이 에너지는 계 내부의 원자·분자의 역학적 에너지를 일컫는다.
 
-    일반적으로, 어떤 체계에 외부로부터 에너지가 가해지면 그만큼 체계의 에너지가 증가한다.
-    이와 같이, 물체에 열을 가하면 그 물체의 내부 에너지가 가해진 열에너지만큼 증가한다.
-    또한 물체에 역학적인 일이 더해져도 역시 내부 에너지는 더해진 일의 양만큼 증가한다.
-    따라서 물체에 열과 일이 동시에 가해졌을 때 내부 에너지는 가해진 열과 일의 양만큼 증가한다.
-    이것을 열역학의 제1법칙이라고 한다.
+//     일반적으로, 어떤 체계에 외부로부터 에너지가 가해지면 그만큼 체계의 에너지가 증가한다.
+//     이와 같이, 물체에 열을 가하면 그 물체의 내부 에너지가 가해진 열에너지만큼 증가한다.
+//     또한 물체에 역학적인 일이 더해져도 역시 내부 에너지는 더해진 일의 양만큼 증가한다.
+//     따라서 물체에 열과 일이 동시에 가해졌을 때 내부 에너지는 가해진 열과 일의 양만큼 증가한다.
+//     이것을 열역학의 제1법칙이라고 한다.
 
-    이 법칙에 따르면 에너지는 형태가 변할 수 있을 뿐 새로 만들어지거나 없어질 수 없다.
-    즉, 일정량의 열을 일로 바꾸었을 때 그 열은 소멸된 것이 아니라 다른 형태의 에너지로 변환된 것이다.
-    열역학 제1법칙은 보다 일반화된 에너지 보존 법칙의 표현이다.
-    `;
+//     이 법칙에 따르면 에너지는 형태가 변할 수 있을 뿐 새로 만들어지거나 없어질 수 없다.
+//     즉, 일정량의 열을 일로 바꾸었을 때 그 열은 소멸된 것이 아니라 다른 형태의 에너지로 변환된 것이다.
+//     열역학 제1법칙은 보다 일반화된 에너지 보존 법칙의 표현이다.
+//     `;
+     // ────────── 프롬프트 세팅 ──────────
+     const sys = {
+      role: 'system',
+      content: '너는 한국어 글쓰기 교사이자 작가다. 사용자에게 대화하지 말고, 요구한 본문만 정확히 작성한다.'
+    };
+    const user = {
+      role: 'user',
+      content: [
+        `오늘 날짜: ${today}, 난수: ${seed}`,
+        `주제 후보: ${topics.join(', ')} 중 1개를 내부적으로 임의 선택(최근 7일 중복 금지).`,
+        levelPrompts[userLevel] ?? levelPrompts[1],
+        `제약: 출력은 한국어 **서술형 본문 1개 단락만**.`,
+        `금지: 질문/제안/대화체/머리말/따옴표/코드블록/메타설명/제목.`,
+        `금지어 예: "주제", "하시겠어요", "원하시면" 등.`
+      ].join('\n')
+    };
 
-// ✅ 불필요한 공백 및 줄바꿈 정리
-generatedText = generatedText
-  .replace(/\r/g, "")                   // 윈도우 개행 제거
-  .replace(/[ \t]+\n/g, "\n")           // 줄 끝 불필요한 공백 제거
-  .replace(/\n{3,}/g, "\n\n")           // 3줄 이상은 2줄로 통일
-  .replace(/(?<!\n)\n(?!\n)/g, " ")     // 단일 줄바꿈은 공백으로 합치기
-  .trim();
+    // ────────── 생성 및 품질 검증 ──────────
+    let generatedText = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const gptRes = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-3.5-turbo',
+          messages: [sys, user],
+          temperature: 0.7
+        },
+        { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+      );
 
-    // // ────────── 프롬프트 세팅 ──────────
-    // const sys = {
-    //   role: 'system',
-    //   content: '너는 한국어 글쓰기 교사이자 작가다. 사용자에게 대화하지 말고, 요구한 본문만 정확히 작성한다.'
-    // };
-    // const user = {
-    //   role: 'user',
-    //   content: [
-    //     `오늘 날짜: ${today}, 난수: ${seed}`,
-    //     `주제 후보: ${topics.join(', ')} 중 1개를 내부적으로 임의 선택(최근 7일 중복 금지).`,
-    //     levelPrompts[userLevel] ?? levelPrompts[1],
-    //     `제약: 출력은 한국어 **서술형 본문 1개 단락만**.`,
-    //     `금지: 질문/제안/대화체/머리말/따옴표/코드블록/메타설명/제목.`,
-    //     `금지어 예: "주제", "하시겠어요", "원하시면" 등.`
-    //   ].join('\n')
-    // };
+      generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
+      generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
 
-    // // ────────── 생성 및 품질 검증 ──────────
-    // let generatedText = '';
-    // for (let attempt = 0; attempt < 3; attempt++) {
-    //   const gptRes = await axios.post(
-    //     'https://api.openai.com/v1/chat/completions',
-    //     {
-    //       model: 'gpt-3.5-turbo',
-    //       messages: [sys, user],
-    //       temperature: 0.7
-    //     },
-    //     { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    //   );
+      //  불필요한 공백 및 줄바꿈 정리 (여기로 이동)
+      generatedText = generatedText
+        .replace(/\r/g, "")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/(?<!\n)\n(?!\n)/g, " ")
+        .trim();
 
-    //   generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
-    //   generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
+      const badPhrase = /(주제|하시겠어요|원하시면|어떠신가요)/.test(generatedText);
+      const hasQuestion = /\?/.test(generatedText);
+      const hasQuotes = /["“”'’]/.test(generatedText);
+      const tooShort = generatedText.replace(/\s/g, '').length < 350;
 
-    //   const badPhrase = /(주제|하시겠어요|원하시면|어떠신가요)/.test(generatedText);
-    //   const hasQuestion = /\?/.test(generatedText);
-    //   const hasQuotes = /["“”'’]/.test(generatedText);
-    //   const tooShort = generatedText.replace(/\s/g, '').length < 350;
+      if (!badPhrase && !hasQuestion && !hasQuotes && !tooShort) break;
 
-    //   if (!badPhrase && !hasQuestion && !hasQuotes && !tooShort) break;
-
-    //   if (attempt === 2) {
-    //     generatedText = generatedText
-    //       .replace(/["“”'’]/g, '')
-    //       .replace(/(^|\n).*?(주제|하시겠어요|원하시면|어떠신가요).*?\n?/g, '')
-    //       .replace(/\?/g, '')
-    //       .trim();
-    //   }
-    // }
+      if (attempt === 2) {
+        generatedText = generatedText
+          .replace(/["“”'’]/g, '')
+          .replace(/(^|\n).*?(주제|하시겠어요|원하시면|어떠신가요).*?\n?/g, '')
+          .replace(/\?/g, '')
+          .trim();
+      }
+    }
 
     
 
