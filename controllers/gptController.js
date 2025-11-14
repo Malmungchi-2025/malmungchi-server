@@ -375,27 +375,24 @@ exports.generateQuote = async (req, res) => {
     // ────────── 생성 및 품질 검증 ──────────
     let generatedText = '';
     for (let attempt = 0; attempt < 3; attempt++) {
-      const pplxRes = await axios.post(
-        "https://api.perplexity.ai/chat/completions",
+
+      const gptRes = await callChat(
+        [
+          { role: 'system', content: sys.content },
+          { role: 'user', content: user.content }
+        ],
         {
-          model: "sonar",     // ✔ 너가 요청한 모델명
-          messages: [sys, user],
           temperature: 0.7,
-          max_tokens: 1200
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.PPLX_API_KEY}`,
-            "Content-Type": "application/json"
-          }
+          max_tokens: 1200,
+          label: 'generateQuote'
         }
       );
 
-      generatedText = pplxRes.data?.choices?.[0]?.message?.content ?? "";
-      generatedText = generatedText.trim();
+      //generatedText = pplxRes.data?.choices?.[0]?.message?.content ?? "";
+      //generatedText = generatedText.trim();
 
-      //generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
-      //generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
+      generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
+      generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
 
       //  불필요한 공백 및 줄바꿈 정리 (여기로 이동)
       generatedText = generatedText
