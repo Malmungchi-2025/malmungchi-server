@@ -1,10 +1,12 @@
 // controllers/gptController.js
+// gpt 프롬프트를 사용하는 모든 api 구현
+// 앱 : 오늘의 학습 글감 생성, ai 대화, 퀴즈 api를 생성함.(윤지/감자)
 const axios = require('axios');
 const http = require('http');
 const https = require('https');
-const pool = require('../config/db');  // ✅ 공용 pool 사용
+const pool = require('../config/db');  // 공용 pool 사용
 
-// ✅ 로그인 필수 전제: app 레벨에서 requireLogin 미들웨어로 보호할 것
+// 로그인 필수 전제: app 레벨에서 requireLogin 미들웨어로 보호할 것
 //    예) app.use('/api/gpt', auth, requireLogin, gptRoutes);
 
 // axios 공통 기본값 (직접 호출 방어)
@@ -200,6 +202,7 @@ function parseJsonLoose(txt) {
  *  -  (user_id, date) UNIQUE UPSERT
  *  -  level: DB 기본값, req.body.level(1~4) 오면 override
  *  -  refresh=1 쿼리로 강제 재생성
+
  */
 exports.generateQuote = async (req, res) => {
   try {
@@ -338,7 +341,10 @@ exports.generateQuote = async (req, res) => {
     const seed = Math.floor(Math.random() * 100000);
 
     
+
 // // ────────── 🔧 고정 글감 삽입 (GPT 대신 발표용으로 임시 사용) ──────────
+
+
 //     let generatedText = `
 //     열역학 제1법칙은 다음과 같이 표현된다.
 //     "어떤 계의 내부 에너지의 증가량은 계에 더해진 열에너지에서 계가 외부에 해준 일을 뺀 양과 같다."
@@ -491,7 +497,7 @@ exports.searchWordDefinition = async (req, res) => {
      * ----------------------------- */
     let raw = gptRes.data.choices[0].message.content?.trim() || '';
 
-    // ✅ 코드블록(````json ... ````, 백틱) 제거 함수
+    // 코드블록(````json ... ````, 백틱) 제거 함수
     const sanitizeJsonString = (str) => {
       return str
         .replace(/^```json\s*/i, '') // 맨 앞의 ```json 제거
@@ -537,9 +543,9 @@ exports.searchWordDefinition = async (req, res) => {
 /**
  * 3. 단어 저장 (프론트 저장 버튼)
  * POST /api/vocabulary
- *  - ✅ user_id 필수
- *  - ✅ study_id가 해당 user의 것인지 검증
- *  - ✅ study_id 미지정 시: 해당 user의 오늘 study로 보정
+ *  -  user_id 필수
+ *  - study_id가 해당 user의 것인지 검증
+ *  - study_id 미지정 시: 해당 user의 오늘 study로 보정
  */
 exports.saveVocabularyManual = async (req, res) => {
   try {
@@ -579,8 +585,8 @@ exports.saveVocabularyManual = async (req, res) => {
 /**
  * 4. 단어 목록 조회 (특정 학습 문단의 단어들)
  * GET /api/vocabulary/:studyId[?today=1]
- *  - ✅ user_id 필수
- *  - ✅ study가 해당 user의 것인지 검증 후 조회
+ *  - user_id 필수
+ *  - study가 해당 user의 것인지 검증 후 조회
  */
 exports.getVocabularyByStudy = async (req, res) => {
   try {
@@ -617,8 +623,8 @@ exports.getVocabularyByStudy = async (req, res) => {
 /**
  * 5. 필사 내용 저장
  * POST /api/study/handwriting
- *  - ✅ user_id 필수
- *  - ✅ study 소유권 검증 후 업데이트
+ *  - user_id 필수
+ *  - study 소유권 검증 후 업데이트
  */
 exports.saveHandwriting = async (req, res) => {
   try {
@@ -650,8 +656,8 @@ exports.saveHandwriting = async (req, res) => {
 /**
  * 6. 필사 내용 조회
  * GET /api/study/handwriting/:studyId
- *  - ✅ user_id 필수
- *  - ✅ study 소유권 검증 후 조회
+ *  -  user_id 필수
+ *  - study 소유권 검증 후 조회
  */
 exports.getHandwriting = async (req, res) => {
   try {
@@ -685,8 +691,8 @@ exports.getHandwriting = async (req, res) => {
 // ──────────────────────────────────────────────────────────────
 // 7. 퀴즈 생성 (중복이면 기존 반환)
 // POST /api/gpt/generate-quiz
-//  - ✅ user_id 필수
-//  - ✅ study 소유권 검증
+//  - user_id 필수
+//  - study 소유권 검증
 // ──────────────────────────────────────────────────────────────
 exports.generateQuiz = async (req, res) => {
   try {
@@ -917,153 +923,12 @@ exports.generateQuiz = async (req, res) => {
   }
 };
 
-// // ──────────────────────────────────────────────────────────────
-// /**
-//  * 7. 퀴즈 생성 (중복이면 기존 반환)
-//  * POST /api/gpt/generate-quiz
-//  *  - ✅ user_id 필수
-//  *  - ✅ study 소유권 검증
-//  */
-// exports.generateQuiz = async (req, res) => {
-//   try {
-//     const userId = req.user?.id;
-//     if (!userId) return res.status(401).json({ success: false, message: '인증 필요' });
-
-//     const { text, studyId } = req.body;
-//     if (!text || !studyId) {
-//       return res.status(400).json({ success: false, message: 'text 또는 studyId가 필요합니다.' });
-//     }
-
-//     await assertStudyOwnerOrThrow(studyId, userId);
-
-//     // 1) 기존 퀴즈 있으면 그대로 반환
-//     const existed = await pool.query(
-//       `SELECT question_index, question, options, answer, explanation
-//          FROM quiz_set
-//         WHERE study_id = $1
-//         ORDER BY question_index`,
-//       [studyId]
-//     );
-//     if (existed.rows.length > 0) {
-//       const quizzes = existed.rows.map(r => ({
-//         questionIndex: r.question_index,
-//         question: r.question,
-//         options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
-//         answer: r.answer,
-//         explanation: r.explanation
-//       }));
-//       return res.json({ success: true, result: quizzes });
-//     }
-
-//     // 2) GPT 호출 (기능 동일)
-//     const prompt = `
-//     너는 국어 교사야. 아래 글을 바탕으로 다음 문제 유형 중 3가지를 **랜덤으로 하나씩** 골라,
-//     각 유형에 맞는 객관식 문제를 **한 문장 질문으로만** 만들어줘.
-
-//     [문제 유형] 1~5 ...
-//     [출력 형식]
-//     [
-//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."},
-//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."},
-//       {"type":"...","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"..."}
-//     ]
-
-//     [필수 규칙]
-//     - **오직 위 JSON 배열만** 출력 (설명, 코드블록, 마크다운 금지)
-//     - 각 문제 유형은 서로 달라야 함
-//     - options 정확히 4개
-//     - answer는 options 중 하나
-//     - question은 한 문장
-
-//     원문:
-//     """${text}"""
-//     `;
-
-//     // 가능하면 JSON 강제 (지원되지 않으면 무시됨: 안전)
-//     const payload = {
-//       model: 'gpt-3.5-turbo',          // 사용 중인 모델 유지
-//       messages: [
-//         { role: 'system', content: '당신은 JSON만 출력하는 보조자입니다.' },
-//         { role: 'user', content: prompt }
-//       ],
-//       temperature: 0.2,
-//       max_tokens: 900,
-//       // 최신 OpenAI SDK/엔드포인트에서 지원되는 경우만 적용됨. 미지원이면 자동 무시.
-//       response_format: { type: 'json_object' } // 객체 강제이므로 아래서 배열만 뽑는 후처리 포함
-//     };
-
-//     const gptRes = await axios.post(
-//       'https://api.openai.com/v1/chat/completions',
-//       {
-//         model: 'gpt-3.5-turbo',
-//         messages: [{ role: 'user', content: prompt }],
-//         temperature: 0.7
-//       },
-//       {
-//         headers: {
-//           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-//           'Content-Type': 'application/json'
-//         }
-//       }
-//     );
-
-//     const raw = gptRes.data.choices?.[0]?.message?.content ?? '';
-//     let quizzes;
-//     try {
-//       quizzes = JSON.parse(raw);
-//     } catch (e) {
-//       console.error('❌ GPT 응답 파싱 실패:', raw);
-//       return res.status(500).json({ success: false, message: 'GPT 응답을 JSON으로 파싱할 수 없습니다.' });
-//     }
-
-//     // 3) DB 저장 (options jsonb)
-//     for (let i = 0; i < quizzes.length; i++) {
-//       const q = quizzes[i];
-//       await pool.query(
-//         `INSERT INTO quiz_set (
-//            study_id, question_index, type, question, options, answer, explanation
-//          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
-//         [
-//           studyId,
-//           i + 1,
-//           q.type || '유형 없음',
-//           q.question,
-//           JSON.stringify(q.options || []),
-//           q.answer,
-//           q.explanation
-//         ]
-//       );
-//     }
-
-//     // 4) 저장 후 조회 동일 포맷 반환
-//     const saved = await pool.query(
-//       `SELECT question_index, question, options, answer, explanation
-//          FROM quiz_set
-//         WHERE study_id = $1
-//         ORDER BY question_index`,
-//       [studyId]
-//     );
-//     const result = saved.rows.map(r => ({
-//       questionIndex: r.question_index,
-//       question: r.question,
-//       options: Array.isArray(r.options) ? r.options : JSON.parse(r.options || '[]'),
-//       answer: r.answer,
-//       explanation: r.explanation
-//     }));
-
-//     return res.json({ success: true, result });
-//   } catch (err) {
-//     console.error('❌ 퀴즈 생성 실패:', err.message);
-//     res.status(err.status || 500).json({ success: false, message: err.message || '퀴즈 생성 실패' });
-//   }
-// };
-
 // ──────────────────────────────────────────────────────────────
 /**
  * 8. 퀴즈 조회
  * GET /api/gpt/quiz/:studyId
- *  - ✅ user_id 필수
- *  - ✅ study 소유권 검증 후 조회
+ *  -  user_id 필수
+ *  -  study 소유권 검증 후 조회
  */
 exports.getQuizzesByStudyId = async (req, res) => {
   try {
@@ -1103,8 +968,8 @@ exports.getQuizzesByStudyId = async (req, res) => {
 /**
  * 9. 사용자 응답 저장 (서버 채점)
  * POST /api/gpt/quiz/answer
- *  - ✅ user_id 필수
- *  - ✅ study 소유권 검증 후 UPDATE
+ *  -  user_id 필수
+ *  -  study 소유권 검증 후 UPDATE
  */
 exports.saveQuizAnswer = async (req, res) => {
   try {
@@ -1267,9 +1132,9 @@ exports.getAvailableDates = async (req, res) => {
 /**
  * 10. 오늘의 학습 완료 시 포인트 지급
  * POST /api/gpt/study/complete-reward
- *  - ✅ user_id 필수
- *  - ✅ 하루 1번만 지급 (user_id + date 유니크)
- *  - ✅ 포인트 지급 후 현재 포인트/이력 반환
+ *  - user_id 필수
+ *  - 하루 1번만 지급 (user_id + date 유니크)
+ *  - 포인트 지급 후 현재 포인트/이력 반환
  */
 // 10. 오늘의 학습 완료 시 포인트 지급 (study_reward 테이블 없이 today_study로 1일 1회 관리)
 exports.giveTodayStudyPoint = async (req, res) => {
@@ -1339,7 +1204,7 @@ exports.giveTodayStudyPoint = async (req, res) => {
     return res.json({
       success: true,
       message: '포인트가 지급되었습니다.',
-      todayReward: POINT,                 // ✅ 안드 명세 유지
+      todayReward: POINT,                 // 안드 명세 유지
       totalPoint: updUser.rows[0]?.point ?? 0
     });
   } catch (err) {
@@ -1352,7 +1217,7 @@ exports.giveTodayStudyPoint = async (req, res) => {
 };
 
 // /**
-//  * 11. 레벨 테스트 생성
+//  * 11. 레벨 테스트 생성 -> 기획 수정으로 해당 api 사용하지 않지만.. 혹시 몰라 api 주석처리함.
 //  * POST /api/gpt/level-test/generate
 //  *  - user_id 필요
 //  *  - 단계별 프롬프트 기반 15문항 생성
@@ -1614,7 +1479,7 @@ exports.generateLevelTest = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // ✅ 초기 레벨 테스트(로그인 후 처음)일 때만 레벨 0으로 리셋
+    // 초기 레벨 테스트(로그인 후 처음)일 때만 레벨 0으로 리셋
     if (stage === 0) {
       await client.query(
         `UPDATE public.users SET level = 0, updated_at = now() WHERE id = $1`,
@@ -1622,14 +1487,14 @@ exports.generateLevelTest = async (req, res) => {
       );
     }
 
-    // ✅ 프리셋 로드
+    // 프리셋 로드
     const { rows } = await client.query(
       `SELECT payload FROM quiz_level_test_template WHERE stage = $1 LIMIT 1`,
       [stage]
     );
     const questions = rows[0]?.payload;
 
-    // ✅ 기본 검증 (길이/형태)
+    // 기본 검증 (길이/형태)
     if (
       !Array.isArray(questions) ||
       questions.length !== 15 ||
@@ -1654,7 +1519,7 @@ exports.generateLevelTest = async (req, res) => {
     // (선택) 위치 기반 소프트 체크 로그를 그대로 쓰고 싶다면:
     // softCheckPositions(questions);
 
-    // ✅ 사용자 기존 문제 삭제 후 저장
+    // 사용자 기존 문제 삭제 후 저장
     await client.query(`DELETE FROM quiz_level_test WHERE user_id = $1`, [userId]);
 
     const insertSql = `
@@ -1673,7 +1538,7 @@ exports.generateLevelTest = async (req, res) => {
     }
 
     await client.query("COMMIT");
-     // ✅ 프론트로 나가는 응답만 깨끗하게 정리해서 전달
+     // 프론트로 나가는 응답만 깨끗하게 정리해서 전달
      const resultForDisplay = questions.map(cleanQuestionObj);
      return res.json({ success: true, result: resultForDisplay });
  
@@ -1775,7 +1640,7 @@ const CATEGORY_MAP = {
   '고급': 'ADVANCED'
 };
 
-// ✅ 새 프롬프트 적용
+// 새 프롬프트 적용
 function buildPrompt({ categoryKor, len = 80 }) {
   const cfg = { category: categoryKor, len };
   return `
@@ -2111,7 +1976,7 @@ async function ensureExplanations(items) {
 }
 
 // ──────────────────────────────────────────────
-// ✅ (NEW) 문제 순서·정답 순서 고정 버전 normalizeItems
+//  (NEW) 문제 순서·정답 순서 고정 버전 normalizeItems
 // ──────────────────────────────────────────────
 function normalizeItemsFixed(rawItems) {
   const items = [];
@@ -2184,7 +2049,7 @@ function normalizeItemsFixed(rawItems) {
     }
   }
 
-  // ✅ 고정 순서: 4지선다(3) → OX(2) → 단답형(2)
+  // 고정 순서: 4지선다(3) → OX(2) → 단답형(2)
   const ordered = [
     ...items.filter(i => i.type === 'MCQ').slice(0, 3),
     ...items.filter(i => i.type === 'OX').slice(0, 2),
@@ -2252,10 +2117,10 @@ exports.createOrGetBatch = async (req, res) => {
         });
       }
 
-      // ✅ 필요한 만큼만 해설 보강 (네트워크 호출 최소화)
+      // 필요한 만큼만 해설 보강 (네트워크 호출 최소화)
       items = await ensureExplanations(items);
 
-      //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!!
+      //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!! 아직은 QA 및, 기말 발표로 부득이하게 정답 위치 고정함.
       const mcqPattern = [4, 2, 1];
       let mcqCount = 0;
       let oxCount = 0;
@@ -2265,7 +2130,7 @@ exports.createOrGetBatch = async (req, res) => {
           const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
           mcqCount++;
 
-          // ✅ 정답 보기를 "id" 기반으로 안전하게 찾아옴
+          // 정답 보기를 "id" 기반으로 안전하게 찾아옴
           console.log('[MCQ before fix]', it.text, it.options.map(o => o.label), '정답ID:', it.correct_option_id);
 
           const correct = it.options[it.correct_option_id - 1] || it.options[0]; // 배열 index로 직접 접근
@@ -2280,7 +2145,7 @@ exports.createOrGetBatch = async (req, res) => {
           console.log('[MCQ after fix]', it.text, it.options.map(o => o.label), '최종 정답:', it.correct_option_id)
                   }
 
-        // ✅ OX 순서 고정: 첫 번째 O, 두 번째 X
+        // OX 순서 고정: 첫 번째 O, 두 번째 X
         else if (it.type === 'OX') {
           it.answer_is_o = (oxCount % 2 === 0);
           oxCount++;
@@ -2674,10 +2539,10 @@ exports.touchTodayAiChat = async (req, res) => {
 
 /**
  * POST /api/gpt/ai-chat/complete-reward
- * - ✅ user_id 필수
- * - ✅ 하루 1회만 지급 (user_id+date 유니크)
- * - ✅ today_ai_chat 테이블 기반
- * - ✅ 선택: ?autoTouch=1 이면 행 없을 때 자동 생성
+ * - user_id 필수
+ * - 하루 1회만 지급 (user_id+date 유니크)
+ * - today_ai_chat 테이블 기반
+ * - 선택: ?autoTouch=1 이면 행 없을 때 자동 생성
  * 응답: { success, message, todayReward, totalPoint }
  */
 exports.giveAiChatDailyReward = async (req, res) => {

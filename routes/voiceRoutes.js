@@ -1,7 +1,4 @@
-
-// module.exports = router;
-
-// routes/voiceRoutes.js
+// routes/voiceRoutes.js -> ai 대화 라우터.(윤지/감자)
 const express = require('express');
 const multer  = require('multer');
 
@@ -11,7 +8,7 @@ const upload  = multer({
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB
 });
 
-// ✅ 컨트롤러: job(기존) + daily(신규) 함께 import
+//  컨트롤러: job(기존) + daily(신규) 함께 import
 const {
   // job(취준생 맞춤)
   getVoicePrompt,

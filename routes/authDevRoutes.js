@@ -1,9 +1,10 @@
 // routes/authDevRoutes.js
+//메일 otp 인증 라우터
 const express = require('express');
 const router = express.Router();
 const { sendMail } = require('../utils/mailer'); // ★ 메일 발송 추가
 
-// ⬇️ 템플릿 import 추가
+//  템플릿 import 추가
 const { renderOtpHtml, renderOtpPlain } = require('../utils/emailTemplates');
 
 // 이메일별 최근 OTP 저장 (인메모리)
@@ -37,7 +38,7 @@ router.post('/dev/request-otp', async (req, res) => {
     //otp 번호 로그 찍기
     console.log(`[DEV][OTP][REQUEST] ${key} -> ${code} (ttl=${EXPIRES_SEC}s)`);
 
-    // ✅ 템플릿 적용
+    //  템플릿 적용
     const html = renderOtpHtml(displayName, code, minutes);
     const text = renderOtpPlain(displayName, code, minutes);
 

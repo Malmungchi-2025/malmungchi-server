@@ -1,4 +1,9 @@
 // controllers/voiceController.js
+// 스터디(오늘의 학습) 기능 컨트롤러.
+// 앱 : ai 음성 대화 구현.(윤지/감자)
+//GOOGLE_TTS_JSON_BASE64를 env에 넣음. 즉 GOOGLE_TTS_JSON_BASE64 사용자 음성 -> 텍스트 변환 => gpt api 텍스트 확인 및 응답 제공
+//실제 gpt api로 음성대화를 구현할 수 있으나, 개발 비용을 줄이기 위해 위와 같은 로직을 사용함.
+
 const axios = require('axios');
 const FormData = require('form-data');
 const http  = require('http');
@@ -147,7 +152,7 @@ exports.voiceHello = async (req, res) => {
   try {
     const mode = 'job';
 
-    // 🔒 발표용 고정 질문
+    // 🔒 발표용 고정 질문 -> 부득이하게 발표 및 QA로 질문 고정함. 이후 주석처리된 것을 살려 원래 기능으로 되돌리기!
     // const starter = pickJobStarter(); // ← 랜덤 호출 주석처리
     const starter = {
       situation: '면접 상황',
@@ -170,8 +175,8 @@ exports.voiceHello = async (req, res) => {
       return res.json({
         success: true,
         mode,
-        situation: starter.situation,     // ✅ 프론트: 태그(칩/작은 말풍선)
-        question:  starter.question,      // ✅ 프론트: 큰 말풍선(회색)
+        situation: starter.situation,     // 프론트: 태그(칩/작은 말풍선)
+        question:  starter.question,      // 프론트: 큰 말풍선(회색)
         text:      fullText,              // (필요하면 사용)
         audioBase64: mp3Buffer.toString('base64'),
         mimeType: 'audio/mpeg'
@@ -214,8 +219,8 @@ exports.voiceHello = async (req, res) => {
 //       return res.json({
 //         success: true,
 //         mode,
-//         situation: starter.situation,     // ✅ 프론트: 태그(칩/작은 말풍선)
-//         question:  starter.question,      // ✅ 프론트: 큰 말풍선(회색)
+//         situation: starter.situation,     // 프론트: 태그(칩/작은 말풍선)
+//         question:  starter.question,      // 프론트: 큰 말풍선(회색)
 //         text:      fullText,              // (필요하면 사용)
 //         audioBase64: mp3Buffer.toString('base64'),
 //         mimeType: 'audio/mpeg'
@@ -332,7 +337,7 @@ exports.voiceChat = async (req, res) => {
       audioBase64: mp3Buffer.toString('base64'),
       mimeType: 'audio/mpeg',
       hint: gptJson.tip,                 // TIP (프론트에서 "TIP:" 접두)
-      needRetry: gptJson.needRetry,      // ✅ 사용자 말풍선 빨간 테두리 여부
+      needRetry: gptJson.needRetry,      //  사용자 말풍선 빨간 테두리 여부
       critique: gptJson.critique         // 간단 피드백(옵션 표시)
     });
 

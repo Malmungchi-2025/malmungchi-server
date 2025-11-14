@@ -1,4 +1,6 @@
 // controllers/authController.js
+// 로그인, 회원가입 관련 컨트롤러.
+// 앱 : 이메일otp 인증 회원가입, 사용자 회원가입 db 저장, 로그인, 사용자 테스트, 마이페이지 사용자 정보 제공 api를 구현함.(윤지/감자)
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../config/db');
@@ -72,7 +74,7 @@ exports.register = async (req, res) => {
     // 1) 먼저 커밋해서 DB 일관성 보장
     await client.query('COMMIT');
 
-    // ✅ 여기서 OTP 생성 + 로그 (최소 수정)
+    // 여기서 OTP 생성 + 로그 (최소 수정)
     const otp = generateNumericOtp(6);
     console.log(`[DEBUG][EMAIL_OTP] ${user.email} → ${otp}`);
 
@@ -184,7 +186,7 @@ exports.resendVerification = async (req, res) => {
       [u.rows[0].id, token, expiresAt]
     );
 
-    // ✅ 여기 추가: OTP 생성 + 로그 (메일 본문엔 넣지 않아도 됨)
+    // 여기 추가: OTP 생성 + 로그 (메일 본문엔 넣지 않아도 됨)
     const otp = generateNumericOtp(6);
     console.log(`[DEBUG][EMAIL_OTP] ${email} → ${otp}`);
 
@@ -251,7 +253,7 @@ exports.login = async (req, res) => {
         name: user.name,
         nickname: user.nickname,
         is_verified: user.is_verified,
-        level: user.level,   // ✅ 추가
+        level: user.level,   // 추가
         friend_code: user.friend_code 
       }
     });
@@ -484,7 +486,7 @@ exports.getMyVocabulary = async (req, res) => {
   }
 };
 
-// ✅ 1) 단어 좋아요 토글
+// 1) 단어 좋아요 토글
 // PATCH /api/auth/me/vocabulary/:vocabId/like  body: { liked: true|false }
 exports.toggleMyVocabularyLike = async (req, res) => {
   try {
@@ -530,7 +532,7 @@ exports.toggleMyVocabularyLike = async (req, res) => {
   }
 };
 
-// ✅ getMyLikedVocabulary (created_at 모드) 수정본
+// getMyLikedVocabulary (created_at 모드) 수정본
 exports.getMyLikedVocabulary = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -743,7 +745,7 @@ exports.getMyBadges = async (req, res) => {
     );
     const isFirst = rankRows[0]?.rank === 1;
 
-    // ✅ first_rank_date 보정 로직 추가
+    // first_rank_date 보정 로직 추가
     if (isFirst) {
       const { rows: firstCheckRows } = await pool.query(
         `SELECT first_rank_date FROM users WHERE id = $1`,
@@ -829,7 +831,7 @@ exports.getMyBadges = async (req, res) => {
       "first_rank": isFirst,
       "rank_1week": false, // 추후 확장 가능
       "rank_1month": false,
-      //"rank_100days": rank100Days, // ✅ 추가된 100일 랭킹 배지
+      //"rank_100days": rank100Days, //  추가된 100일 랭킹 배지
       "bonus_month": days >= 30,
       "early_morning": earlyMorning,
       "five_logins_day": todayCnt >= 5,
@@ -861,50 +863,3 @@ exports.getMyBadges = async (req, res) => {
   }
 };
 
-
-
-// const pool = require('../config/db');
-// const jwt = require('jsonwebtoken');
-// const bcrypt = require('bcryptjs');
-
-// exports.loginUser = async (req, res) => {
-//   const { email, password } = req.body;
-
-//   if (!email || !password) {
-//     return res.status(400).json({ isSuccess: false, code: "COMMON400", message: "이메일과 비밀번호를 입력해주세요." });
-//   }
-
-//   try {
-//     const result = await pool.query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
-
-//     if (result.rows.length === 0) {
-//       return res.status(401).json({ isSuccess: false, code: "AUTH401", message: "이메일 또는 비밀번호가 올바르지 않습니다." });
-//     }
-
-//     const user = result.rows[0];
-
-//     // 비밀번호 확인 (bcrypt 사용)
-//     const isMatch = await bcrypt.compare(password, user.password);
-//     if (!isMatch) {
-//       return res.status(401).json({ isSuccess: false, code: "AUTH401", message: "이메일 또는 비밀번호가 올바르지 않습니다." });
-//     }
-
-//     // JWT 발급
-//     const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, { expiresIn: '24h' });
-
-//     res.json({
-//       isSuccess: true,
-//       code: "COMMON200",
-//       message: "성공입니다.",
-//       result: {
-//         userId: user.id,
-//         accessToken: token,
-//         status: user.status,
-//         inactiveDate: user.inactive_date || null
-//       }
-//     });
-//   } catch (err) {
-//     console.error('❌ 로그인 오류:', err.message);
-//     res.status(500).json({ isSuccess: false, code: "SERVER500", message: "서버 오류" });
-//   }
-// };
