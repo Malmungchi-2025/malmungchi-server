@@ -105,6 +105,56 @@ async function callPerplexityChat(messages, { temperature = 0.7, max_tokens = 12
   ).then(res => res.data);
 }
 
+//전문가용 난이도 검증 함수
+function checkDifficulty(text) {
+  if (!text) return false;
+
+  const length = text.replace(/\s/g, "").length;
+  if (length < 450) return false; // 480~520자 기준 기초 필터
+
+  // ❶ 금지된 일상·사건·직장 묘사 필터
+  const bannedWords = [
+    "오늘","어제","아침","점심","저녁","사무실","회사","직장",
+    "출근","퇴근","회의","동료","팀원","이메일","프로젝트",
+    "점심","식사","학교","경험","일상","상황","함께","친구",
+    "왔다","했다","갔다","사용했다","사용했다","시작했다"
+  ];
+  if (bannedWords.some(w => text.includes(w))) return false;
+
+  // ❷ 금지된 단순 서술 패턴 필터
+  const diaryPattern = /(했다|하였다|합니다|되었습니다)\s/g;
+  if (diaryPattern.test(text)) return false;
+
+  // ❸ 단순 보고문 패턴 (너가 추가한 것)
+  const simpleVerbPattern = /(된다|이었다|이었다가|되고|되어)/g;
+  if (simpleVerbPattern.test(text)) return false;
+
+  // ❸ 금지된 문장 구성 (대화체, 질문 등)
+  if (/[?]/.test(text)) return false;
+  if (/["“”'’]/.test(text)) return false;
+
+  // ❹ 전문·추상 개념어 최소 포함 수
+  const conceptWords = [
+    "구조","요인","관계","맥락","경향","변동","조정","상호작용",
+    "제약","정합성","상충","효율성","지속 가능성","담론",
+    "제도적","구조적","추상화","조건","가정","분석","모형",
+    "체계","규범","합리성","긴장","비대칭"
+  ];
+  let hit = conceptWords.filter(w => text.includes(w)).length;
+  if (hit < 5) return false;
+
+  // ❺ 문장 수 (최소 4~8문장)
+  const sentenceCount = text.split(/[.]/).filter(s => s.trim().length > 5).length;
+  if (sentenceCount < 4) return false;
+
+  // ❻ 문장 길이 평균 (복문 여부 체크)
+  const sentences = text.split(/[.]/).map(s => s.trim());
+  const longSentences = sentences.filter(s => s.length >= 25).length;
+  if (longSentences < 4) return false;
+
+  return true;
+}
+
 // 1) KST 기준 yyyy-mm-dd
 function getKstToday() {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -260,28 +310,14 @@ exports.generateQuote = async (req, res) => {
     // ────────────────────────────────────────────────
 
     const COMMON_RULES = `
-      공통 규칙:
-      - 심층적·추상적 개념 중심으로 작성하며 일상적 상황·사례·경험은 금지한다.
-      - 구체적 사건·사람·직장·시간·감정 묘사 모두 금지. 추상화된 표현만 허용한다.
-      - 텍스트의 난도는 대학 교양 이상 또는 수능 비문학 상위 5% 수준으로 유지한다.
-      - 단락은 1개로 작성하며 4~8개의 중장문으로 구성한다.
-      - 문장 길이는 최소 25~40자 이상이며 복문·절·분사구·조건·대조 구조를 포함해야 한다.
-      - 논리 층위는 최소 3단계 이상 포함한다:
-        1단계: 개념/현상 제시
-        2단계: 원인/구조적 요인 분석
-        3단계: 요인 간 관계 또는 작용 방식 설명
-        4단계(선택): 전략적 또는 이론적 함의 도출
-      - 문장 구조는 인과·대조·비교·가정·추론을 중심으로 구성한다.
-      - 어휘는 추상명사·구조적 개념어·이론적 용어를 중심으로 하고,
-        기본 생활어·감정어·개별 실무어는 사용 금지.
-      - 아래 예시와 유사한 수준의 복잡한 개념문을 구성할 것 (직접 사용 금지):
-      - 특정 현상이 단일 요인으로 설명되지 않고 복합적 상호작용 속에서 변형되는 경우를 가정하라.
-      - 제도적 규범이 표면적으로 합리성을 갖추지만 실제 운영에서는 상충을 유발하는 이유를 고려하라.
-      - 질문, 제목, 감탄문, 이미지·메타설명·따옴표·코드블록 금지.
-      - 분량: 480~520자 엄수.
-      - 예시 수준의 개념문을 참고하되 직접 사용 금지:
-  
-            
+       공통 규칙:
+      - 문장 길이 30자 이상, 복합 문장 70% 이상 포함
+      - 추상명사·전문용어 8개 이상 포함 필수
+      - 4단계 논리 구조 엄격 준수
+      - 사례·일상적 표현 절대 금지
+      - 정보 밀도 극대화, 난이도 극대화 반복 지시
+      - 금지어: 질문, 인용구, 대화체 엄격 금지
+      - 분량: 480~520자 엄수 
       `
       
       ;
@@ -380,18 +416,28 @@ exports.generateQuote = async (req, res) => {
       ].join('\n')
     };
 
+    const getLevelPrompt = (level, retryCount) => {
+      const basePrompt = levelPrompts[level] ?? levelPrompts[1];
+      if (retryCount === 0) return basePrompt;
+      if (retryCount === 1)
+        return basePrompt + '\n더 심오하고 학문적 어휘를 사용하여 작성하세요.';
+      if (retryCount === 2)
+        return basePrompt + '\n복잡한 이론 간 상호작용 설명을 추가하여 난이도를 최대화하세요.';
+      return basePrompt;
+    };
+    
+
     // ────────── 생성 및 품질 검증 ──────────
     let generatedText = '';
     for (let attempt = 0; attempt < 3; attempt++) {
+      const promptText = getLevelPrompt(userLevel, attempt);
 
-
-      //퍼플렉시티 api로 변경함.
       const perplexityRes = await callPerplexityChat(
         [
           { role: 'system', content: sys.content },
-          { role: 'user', content: user.content }
+          { role: 'user', content: promptText }
         ],
-        { temperature: 0.7, max_tokens: 1200, label: 'generateQuote' }
+        { temperature: attempt < 1 ? 0.8 : 0.9, max_tokens: 1500, label: 'generateQuote' }
       );
 
       //기존 gpt api호출 입니다! -> 퍼플렉시티도 별로면....이걸 살려야...
@@ -410,24 +456,24 @@ exports.generateQuote = async (req, res) => {
       //generatedText = pplxRes.data?.choices?.[0]?.message?.content ?? "";
       //generatedText = generatedText.trim();
 
-      // 안전한 raw 추출
-      const raw = perplexityRes?.choices?.[0]?.message?.content;
+      // // 안전한 raw 추출
+      // const raw = perplexityRes?.choices?.[0]?.message?.content;
 
-      // null/undefined 대비
-      generatedText = (raw ?? '').trim();
+      // // null/undefined 대비
+      // generatedText = (raw ?? '').trim();
 
 
       
-      // 코드블록 제거 (이거 꼭 있어야 함!)
+      // // 코드블록 제거 (이거 꼭 있어야 함!)
+      // generatedText = generatedText.replace(/^```[\s\S]*?```/gm, "").trim();
+
+      
+      generatedText = (perplexityRes?.choices?.[0]?.message?.content ?? '').trim();
       generatedText = generatedText.replace(/^```[\s\S]*?```/gm, "").trim();
-
-
-
-      //generatedText = (perplexityRes.choices?.[0]?.message?.content ?? '').trim(); //퍼플렉시티로 응답을 수정함.
-      //generatedText = (gptRes.data.choices?.[0]?.message?.content || '').trim();
-      //generatedText = generatedText.replace(/^```[\s\S]*?$/gm, '').trim();
-
-      //  불필요한 공백 및 줄바꿈 정리 (여기로 이동)
+      //generatedText = generatedText.replace(/^```[\s\S]*?```/gm, "").trim();
+      
+      
+      // 공백 정리
       generatedText = generatedText
         .replace(/\r/g, "")
         .replace(/[ \t]+\n/g, "\n")
@@ -435,19 +481,12 @@ exports.generateQuote = async (req, res) => {
         .replace(/(?<!\n)\n(?!\n)/g, " ")
         .trim();
 
-      const badPhrase = /(주제|하시겠어요|원하시면|어떠신가요)/.test(generatedText);
-      const hasQuestion = /\?/.test(generatedText);
-      const hasQuotes = /["“”'’]/.test(generatedText);
-      const tooShort = generatedText.replace(/\s/g, '').length < 350;
+      // ⬇️ 여기가 핵심: 난이도 통과했으면 break
+      if (checkDifficulty(generatedText)) break;
 
-      if (!badPhrase && !hasQuestion && !hasQuotes && !tooShort) break;
-
+      // 마지막 시도면 그래도 최소한의 정리
       if (attempt === 2) {
-        generatedText = generatedText
-          .replace(/["“”'’]/g, '')
-          .replace(/(^|\n).*?(주제|하시겠어요|원하시면|어떠신가요).*?\n?/g, '')
-          .replace(/\?/g, '')
-          .trim();
+        generatedText = generatedText.replace(/["“”'’]/g, '').trim();
       }
     }
 
