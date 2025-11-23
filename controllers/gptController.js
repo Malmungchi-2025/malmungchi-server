@@ -90,7 +90,7 @@ async function callPerplexityChat(messages, { temperature = 0.7, max_tokens = 12
   return axios.post(
     'https://api.perplexity.ai/chat/completions',
     {
-      model: 'mistral-7b-instruct',
+      model: 'sonar-large',
       messages,
       temperature,
       max_tokens,
