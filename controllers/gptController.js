@@ -1753,6 +1753,9 @@ function buildPrompt({ categoryKor, len = 80 }) {
   
   문제 조건:
   [중요 규칙: 밑줄(underline) 사용 기준]
+  - MCQ와 OX 문제에는 밑줄 마크다운(_word_)을 절대 사용하지 않는다.
+  - 만약 GPT가 실수로 밑줄 마크다운을 넣으면 그 문제는 무효이며 즉시 다시 생성한다.
+  - SHORT 문제에서만 밑줄 마크다운을 사용하며, 문장 안에서 단 한 개의 _word_ 만 허용한다.
 
     1) 4지선다형(MCQ)
     - question 문장에서 밑줄 마크다운(_단어_)을 절대 사용하지 않는다.
@@ -2088,6 +2091,30 @@ async function ensureExplanations(items) {
   return items;
 }
 
+function resolveCorrectOption(options, answer) {
+  const clean = String(answer ?? "").trim();
+
+  // 1) 완전 일치
+  for (const o of options) {
+    if (o.label.trim() === clean) return o.id;
+  }
+
+  // 2) 공백 제거 후 유사 일치
+  for (const o of options) {
+    if (
+      o.label.replace(/\s+/g, '') === clean.replace(/\s+/g, '')
+    ) return o.id;
+  }
+
+  // 3) GPT가 “1번, 2번…” 형식으로 답한 경우
+  const num = Number(clean.replace(/[^0-9]/g, ""));
+  if (!isNaN(num) && num >= 1 && num <= options.length) {
+    return options[num - 1].id;
+  }
+
+  return null; // 못 찾으면 null
+}
+
 // ──────────────────────────────────────────────
 //  (NEW) 문제 순서·정답 순서 고정 버전 normalizeItems
 // ──────────────────────────────────────────────
@@ -2113,11 +2140,13 @@ function normalizeItemsFixed(rawItems) {
         opts[opts.length - 1] ?? { id: 4, label: String(it.answer || '정답') }
       ].map((o, idx) => ({ id: idx + 1, label: o.label }));
 
+      // 정답 항상 마지막 보기(4번)를 기준으로 보장
+      const correctOptionId = fixedOptions[3] ? 4 : 1;
       items.push({
         type: 'MCQ',
         text: qText,
         options: fixedOptions,
-        correct_option_id: 4, // 항상 4번
+        correct_option_id: correctOptionId, // 항상 4번
         explanation: sanitizeExplanation(it.explanation, {
           type: 'MCQ',
           answer: fixedOptions[3].label,
@@ -2246,8 +2275,13 @@ exports.createOrGetBatch = async (req, res) => {
           // 정답 보기를 "id" 기반으로 안전하게 찾아옴
           console.log('[MCQ before fix]', it.text, it.options.map(o => o.label), '정답ID:', it.correct_option_id);
 
-          const correct = it.options[it.correct_option_id - 1] || it.options[0]; // 배열 index로 직접 접근
-          const others = it.options.filter((_, i) => i !== it.correct_option_id - 1);
+          // 정답 ID가 null/non-number 이면 4번으로 강제
+          let cid = Number(it.correct_option_id);
+          if (!cid || cid < 1 || cid > it.options.length) cid = 4;
+
+          const correct = it.options[cid - 1];
+          const others = it.options.filter((_, i) => i !== cid - 1);
+
           const fixedOptions = [...others];
           fixedOptions.splice(correctIdx, 0, correct);
 
@@ -2284,7 +2318,7 @@ for (const it of items) {
       `INSERT INTO quiz_question
           (batch_id, question_index, type, text, options_json, correct_option_id, explanation)
         VALUES ($1,$2,'MCQ',$3,$4::jsonb,$5,$6)`,
-      [batchId, idx, it.text, JSON.stringify(it.options || []), it.correct_option_id ?? null, exp]
+      [batchId, idx, it.text, JSON.stringify(it.options || []), Number(it.correct_option_id || 4), exp]
     );
   } else if (it.type === 'OX') {
     await client.query(
