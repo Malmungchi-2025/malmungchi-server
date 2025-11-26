@@ -185,6 +185,59 @@ function logOpenAiError(tag, err) {
   console.error(`[${tag}] OpenAI error:`, { msg, status, data });
 }
 
+//신규 텍스트 only gpt 호출(job)
+exports.voiceChatText = async (req, res) => {
+  try {
+    const userText = (req.body?.text || "").trim();
+    const mode = 'job';
+    const baseSystem = getJobPrompt();
+
+    const gpt = await oa.post('/chat/completions', {
+      model: GPT_MODEL,
+      messages: [
+        { role: 'system', content: baseSystem },
+        { role: 'user', content: userText }
+      ]
+    });
+
+    const raw = gpt.data.choices[0].message.content.trim();
+    const json = JSON.parse(raw);
+
+    return res.json({ success: true, ...json });
+
+  } catch (err) {
+    logOpenAiError("GPT-TEXT", err);
+    return res.status(500).json({ success: false, message: "텍스트 GPT 실패" });
+  }
+};
+
+//신규 텍스트 only gpt 호출(자유대화)
+exports.dailyVoiceChatText = async (req, res) => {
+  try {
+    const userText = (req.body?.text || "").trim();
+    const mode = 'daily';
+    const baseSystem = getDailyPrompt();
+
+    const gpt = await oa.post('/chat/completions', {
+      model: GPT_MODEL,
+      messages: [
+        { role: 'system', content: baseSystem },
+        { role: 'user', content: userText }
+      ]
+    });
+
+    const raw = gpt.data.choices[0].message.content.trim();
+    const json = JSON.parse(raw);
+
+    return res.json({ success: true, ...json });
+
+  } catch (err) {
+    logOpenAiError("DAILY-GPT-TEXT", err);
+    return res.status(500).json({ success: false, message: "daily 텍스트 GPT 실패" });
+  }
+};
+
+
 /* =========================================================
  * C. 노트패드용 프롬프트 원문 (취준생 전용)
  * GET /api/voice/prompts
