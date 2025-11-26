@@ -503,15 +503,23 @@ exports.generateQuote = async (req, res) => {
       
       // 공백 정리
       generatedText = generatedText
-        .replace(/\r/g, "")
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .replace(/(?<!\n)\n(?!\n)/g, " ")
-        .replace(/\[\d+\]/g, "")    
-        .replace(/\(\d+\)/g, "")     
-        .trim();
+      .replace(/\r/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/(?<!\n)\n(?!\n)/g, " ")
+      .trim();
 
-      // ⬇️ 여기가 핵심: 난이도 통과했으면 break
+      // --- 논문 스타일 인용 완전 제거 ---
+      // [1][2][5][7] 같은 연속 인용
+      generatedText = generatedText.replace(/(\[\d+\])+/g, "");
+
+      // (1)(2)(3) 같은 인용
+      generatedText = generatedText.replace(/(\(\d+\))+/g, "");
+
+      // 인용 제거 후 남은 이중 공백/이상한 공백 정리
+      generatedText = generatedText.replace(/\s{2,}/g, " ").trim();
+
+      //  여기가 핵심: 난이도 통과했으면 break
       if (checkDifficulty(generatedText)) break;
 
       // 마지막 시도면 그래도 최소한의 정리
