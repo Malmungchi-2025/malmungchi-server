@@ -320,6 +320,7 @@ exports.generateQuote = async (req, res) => {
 
     분량은 반드시 480~520자 사이여야 하며, 이 범위를 벗어나면 안 됩니다.
     출력은 본문 텍스트만 반환하고, 제목·번호·문제·해설 등은 절대 붙이지 마세요.
+    학술 논문 스타일의 인용 표시 [1], [2], (1), (2) 등은 절대 사용하지 마세요.
     `;
 
 
@@ -506,6 +507,8 @@ exports.generateQuote = async (req, res) => {
         .replace(/[ \t]+\n/g, "\n")
         .replace(/\n{3,}/g, "\n\n")
         .replace(/(?<!\n)\n(?!\n)/g, " ")
+        .replace(/\[\d+\]/g, "")    
+        .replace(/\(\d+\)/g, "")     
         .trim();
 
       // ⬇️ 여기가 핵심: 난이도 통과했으면 break
