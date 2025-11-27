@@ -485,12 +485,29 @@ router.get("/kakao/callback", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    return res.json({
-      success: true,
-      message: "카카오 로그인 성공",
-      token,
-      user,
-    });
+    
+    // 웹 / 앱(안드로이드) 분기 처리
+   
+    const platform = req.query.platform || "app";
+
+    if (platform === "web") {
+      // 웹 로그인(JSON)
+      return res.json({
+        success: true,
+        message: "카카오 로그인 성공",
+        token,
+        user,
+      });
+    }
+
+    // 앱 로그인 (URI 스킴 redirect)
+    const appScheme = process.env.APP_SCHEME || "malchi";
+    const redirectUri =
+      `${appScheme}://kakao-login` +
+      `?token=${encodeURIComponent(token)}` +
+      `&userId=${user.id}`;
+
+    return res.redirect(redirectUri);
 
   } catch (err) {
     console.error("카카오 로그인 오류:", err);
