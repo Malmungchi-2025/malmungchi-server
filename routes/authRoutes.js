@@ -4,6 +4,10 @@ const express = require('express');
 const router = express.Router();
 const { sendMail } = require('../utils/mailer'); 
 
+const axios = require("axios");
+const jwt = require("jsonwebtoken");
+const pool = require("../config/db");
+
 
 const {
   register,
@@ -349,4 +353,152 @@ router.post('/me/nickname-test/result', auth, requireLogin, saveNicknameTestInto
  *                 early_morning: false
  */
 router.get('/me/badges', auth, requireLogin, getMyBadges);
+
+
+ /**
+ * @swagger
+ * /api/auth/kakao:
+ *   get:
+ *     summary: 카카오 로그인 시작 (Redirect)
+ *     description: >
+ *       카카오 계정으로 로그인하기 위해 카카오 인증 페이지로 리다이렉트합니다.  
+ *       브라우저 또는 앱(WebView)이 이 URL을 호출하면 카카오 로그인 화면이 열립니다.
+ *     tags: [Auth]
+ *     responses:
+ *       302:
+ *         description: 카카오 인증 페이지로 리다이렉트됨
+ */
+// 카카오 로그인 시작 -> 11.27 구현.
+router.get("/kakao", (req, res) => {
+  const kakaoURL = `https://kauth.kakao.com/oauth/authorize?response_type=code&client_id=${process.env.KAKAO_REST_API_KEY}&redirect_uri=${process.env.KAKAO_REDIRECT_URI}`;
+  return res.redirect(kakaoURL);
+});
+
+
+/**
+ * @swagger
+ * /api/auth/kakao/callback:
+ *   get:
+ *     summary: 카카오 로그인 Callback (카카오 서버 → 우리 서버)
+ *     description: >
+ *       카카오 로그인 성공 후 카카오 서버가 우리 서버로 전달하는 리다이렉트 엔드포인트입니다.  
+ *       카카오는 인증 코드(code)를 보내며, 서버는 해당 코드로 access_token을 요청하고  
+ *       사용자 정보를 조회하여 회원가입/로그인을 처리한 후 JWT 토큰을 반환합니다.
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 카카오 인증 후 전달되는 인가 코드(authorization code)
+ *     responses:
+ *       200:
+ *         description: 카카오 로그인 처리 성공 (JWT 발급)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: 카카오 로그인 성공
+ *                 token:
+ *                   type: string
+ *                   example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *                 user:
+ *                   type: object
+ *                   description: 데이터베이스에 저장된 사용자 정보
+ *       500:
+ *         description: 카카오 로그인 중 서버 오류 발생
+ */
+// 카카오 callback (카카오 서버 → 우리 서버)
+router.get("/kakao/callback", async (req, res) => {
+  const { code } = req.query;
+
+  try {
+    // 1) access_token 받기
+    const tokenResp = await axios.post(
+      "https://kauth.kakao.com/oauth/token",
+      null,
+      {
+        params: {
+          grant_type: "authorization_code",
+          client_id: process.env.KAKAO_REST_API_KEY,
+          redirect_uri: process.env.KAKAO_REDIRECT_URI,
+          code,
+        },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+        },
+      }
+    );
+
+    const accessToken = tokenResp.data.access_token;
+
+    // 2) user info 요청
+    const userResp = await axios.get("https://kapi.kakao.com/v2/user/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const data = userResp.data;
+    const kakaoId = String(data.id);
+    const email = data.kakao_account?.email || null;
+    const nickname = data.properties?.nickname || "카카오사용자";
+    const profileImage = data.properties?.profile_image || null;
+
+    // email/password/name null 허용 X → 보정
+    const finalEmail = email || `kakao_${kakaoId}@social.com`;
+    const finalPassword = "SOCIAL_LOGIN";
+    const finalName = nickname;
+
+    // 3) 기존 유저 찾기
+    const findSql = `SELECT * FROM users WHERE kakao_id = $1 LIMIT 1`;
+    const result = await pool.query(findSql, [kakaoId]);
+    let user = result.rows[0];
+
+    // 4) 없으면 신규 생성
+    if (!user) {
+      const insertSql = `
+        INSERT INTO users (email, password, name, kakao_id, profile_image)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+      const values = [
+        finalEmail,
+        finalPassword,
+        finalName,
+        kakaoId,
+        profileImage,
+      ];
+      const insertResult = await pool.query(insertSql, values);
+      user = insertResult.rows[0];
+    }
+
+    // 5) JWT 발급
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.json({
+      success: true,
+      message: "카카오 로그인 성공",
+      token,
+      user,
+    });
+
+  } catch (err) {
+    console.error("카카오 로그인 오류:", err);
+    return res.status(500).json({
+      success: false,
+      message: "카카오 로그인 처리 실패",
+      error: err.message,
+    });
+  }
+});
 module.exports = router;
