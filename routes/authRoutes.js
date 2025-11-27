@@ -459,9 +459,14 @@ router.get("/kakao/callback", async (req, res) => {
     const findSql = `SELECT * FROM users WHERE kakao_id = $1 LIMIT 1`;
     const result = await pool.query(findSql, [kakaoId]);
     let user = result.rows[0];
+    let isNewUser = false;
+
+    
 
     // 4) 없으면 신규 생성
     if (!user) {
+      //신규 여부 플래그 추가
+      isNewUser = true;
       const insertSql = `
         INSERT INTO users (email, password, name, kakao_id, profile_image)
         VALUES ($1, $2, $3, $4, $5)
@@ -497,6 +502,7 @@ router.get("/kakao/callback", async (req, res) => {
         message: "카카오 로그인 성공",
         token,
         user,
+        isNewUser,
       });
     }
 
@@ -505,7 +511,8 @@ router.get("/kakao/callback", async (req, res) => {
     const redirectUri =
       `${appScheme}://kakao-login` +
       `?token=${encodeURIComponent(token)}` +
-      `&userId=${user.id}`;
+      `&userId=${user.id}` +
+      `&isNewUser=${isNewUser}`;
 
     return res.redirect(redirectUri);
 
@@ -566,9 +573,11 @@ router.post("/kakao/app-login", async (req, res) => {
     const findSql = `SELECT * FROM users WHERE kakao_id = $1 LIMIT 1`;
     const result = await pool.query(findSql, [kakaoId]);
     let user = result.rows[0];
+    let isNewUser = false;
 
     // 신규 생성
     if (!user) {
+      isNewUser = true;  
       const insertSql = `
         INSERT INTO users (email, password, name, kakao_id, profile_image)
         VALUES ($1, $2, $3, $4, $5)
@@ -597,6 +606,7 @@ router.post("/kakao/app-login", async (req, res) => {
       message: "카카오 로그인 성공",
       token,
       user,
+      isNewUser, 
     });
 
   } catch (err) {
