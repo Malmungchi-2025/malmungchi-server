@@ -518,4 +518,94 @@ router.get("/kakao/callback", async (req, res) => {
     });
   }
 });
+/**
+ * @swagger
+ * /api/auth/kakao/app-login:
+ *   post:
+ *     summary: 안드로이드 전용 카카오 로그인
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [accessToken]
+ *             properties:
+ *               accessToken:
+ *                 type: string
+ *                 example: "kakao_access_token_here"
+ *     responses:
+ *       200:
+ *         description: 로그인 성공
+ */
+router.post("/kakao/app-login", async (req, res) => {
+  const { accessToken } = req.body;
+
+  if (!accessToken) {
+    return res.status(400).json({ success: false, message: "accessToken 필요" });
+  }
+
+  try {
+    // 1) 카카오 사용자 정보 요청
+    const userResp = await axios.get("https://kapi.kakao.com/v2/user/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const data = userResp.data;
+    const kakaoId = String(data.id);
+    const email = data.kakao_account?.email || null;
+    const nickname = data.properties?.nickname || "카카오사용자";
+    const profileImage = data.properties?.profile_image || null;
+
+    const finalEmail = email || `kakao_${kakaoId}@social.com`;
+    const finalPassword = "SOCIAL_LOGIN";
+    const finalName = nickname;
+
+    // DB 조회
+    const findSql = `SELECT * FROM users WHERE kakao_id = $1 LIMIT 1`;
+    const result = await pool.query(findSql, [kakaoId]);
+    let user = result.rows[0];
+
+    // 신규 생성
+    if (!user) {
+      const insertSql = `
+        INSERT INTO users (email, password, name, kakao_id, profile_image)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+      const values = [
+        finalEmail,
+        finalPassword,
+        finalName,
+        kakaoId,
+        profileImage,
+      ];
+      const insertResult = await pool.query(insertSql, values);
+      user = insertResult.rows[0];
+    }
+
+    // JWT 발급
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.json({
+      success: true,
+      message: "카카오 로그인 성공",
+      token,
+      user,
+    });
+
+  } catch (err) {
+    console.error("카카오 앱 로그인 오류:", err);
+    return res.status(500).json({
+      success: false,
+      message: "카카오 앱 로그인 실패",
+      error: err.message,
+    });
+  }
+});
 module.exports = router;
