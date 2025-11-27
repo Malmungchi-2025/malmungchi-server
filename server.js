@@ -40,6 +40,7 @@ app.use((req, res, next) => {
   res.setTimeout(120000);
   next();
 });
+
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 
 const { auth } = require("./middlewares/auth");

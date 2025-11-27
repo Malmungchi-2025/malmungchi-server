@@ -22,13 +22,38 @@ exports.createWriting = async (req, res) => {
   }
 };
 
+// exports.getWritingsByPrompt = async (req, res) => {
+//   const promptId = req.query.promptId;
+//   try {
+//     const result = await pool.query(
+//       `SELECT * FROM writings
+//        WHERE prompt_id = $1 AND is_published = true
+//        ORDER BY created_at DESC`,
+//       [promptId]
+//     );
+//     res.json(result.rows);
+//   } catch (error) {
+//     console.error("❌ DB 조회 오류:", error);
+//     res.status(500).json({ error: "서버 오류" });
+//   }
+// };
+
 exports.getWritingsByPrompt = async (req, res) => {
   const promptId = req.query.promptId;
   try {
     const result = await pool.query(
-      `SELECT * FROM writings
-       WHERE prompt_id = $1 AND is_published = true
-       ORDER BY created_at DESC`,
+      `SELECT 
+         w.id,
+         w.title,
+         w.content,
+         w.created_at,
+         w.is_published,
+         w.custom_color AS color,
+         COALESCE(u.name, '익명') AS author
+       FROM writings w
+       LEFT JOIN users u ON w.user_id = u.id
+       WHERE w.prompt_id = $1 AND w.is_published = true
+       ORDER BY w.created_at DESC`,
       [promptId]
     );
     res.json(result.rows);

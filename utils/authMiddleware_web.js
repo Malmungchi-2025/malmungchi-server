@@ -8,13 +8,15 @@ async function auth(req, _res, next) {
     if (token) {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
       const { rows } = await pool.query(
-        "SELECT id, email, is_verified FROM users WHERE id=$1",
+        "SELECT id, email, name, nickname, is_verified FROM users WHERE id=$1",
         [payload.id]
       );
       if (rows[0]) {
         req.user = {
           id: rows[0].id,
           email: rows[0].email,
+          name: rows[0].name,
+          nickname: rows[0].nickname,
           isVerified: rows[0].is_verified,
         };
       }
