@@ -468,7 +468,7 @@ router.get("/kakao/callback", async (req, res) => {
       //신규 여부 플래그 추가
       isNewUser = true;
       const insertSql = `
-        INSERT INTO users (email, password, name, kakao_id, profile_image)
+        INSERT INTO users (email, password, name, kakao_id)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING *
       `;
