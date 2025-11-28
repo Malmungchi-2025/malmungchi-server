@@ -465,20 +465,25 @@ router.get("/kakao/callback", async (req, res) => {
 
     // 4) 없으면 신규 생성
     if (!user) {
-      //신규 여부 플래그 추가
-      isNewUser = true;
+      isNewUser = true;  
+    
+      const defaultAvatar = "img_malchi"; // 앱 기본 아바타
+    
       const insertSql = `
-        INSERT INTO users (email, password, name, kakao_id, profile_image)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO users (email, password, name, kakao_id, profile_image, avatar_name)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
       `;
+    
       const values = [
         finalEmail,
         finalPassword,
         finalName,
         kakaoId,
-        profileImage,
+        null,            // 카카오 이미지 저장 X
+        defaultAvatar    // 기본 아바타 저장
       ];
+    
       const insertResult = await pool.query(insertSql, values);
       user = insertResult.rows[0];
     }
@@ -551,8 +556,9 @@ router.get("/kakao/callback", async (req, res) => {
  *       200:
  *         description: 로그인 성공
  */
+// 안드로이드 전용 카카오 로그인
 router.post("/kakao/app-login", async (req, res) => {
-  const { accessToken, nickname: clientNickname, profileImage: clientProfileImage } = req.body;
+  const { accessToken } = req.body;
 
   if (!accessToken) {
     return res.status(400).json({ success: false, message: "accessToken 필요" });
@@ -568,7 +574,6 @@ router.post("/kakao/app-login", async (req, res) => {
     const kakaoId = String(data.id);
     const email = data.kakao_account?.email || null;
     const nickname = data.properties?.nickname || "카카오사용자";
-    const profileImage = data.properties?.profile_image || null;
 
     const finalEmail = email || `kakao_${kakaoId}@social.com`;
     const finalPassword = "SOCIAL_LOGIN";
@@ -582,19 +587,25 @@ router.post("/kakao/app-login", async (req, res) => {
 
     // 신규 생성
     if (!user) {
-      isNewUser = true;  
+      isNewUser = true;
+
+      const defaultAvatar = "img_malchi"; // 기본 아바타
+
       const insertSql = `
-        INSERT INTO users (email, password, name, kakao_id, profile_image)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO users (email, password, name, kakao_id, profile_image, avatar_name)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
       `;
+
       const values = [
         finalEmail,
         finalPassword,
         finalName,
         kakaoId,
-        profileImage,
+        null,          // 카카오 프로필 이미지 사용 X
+        defaultAvatar  // 기본 아바타
       ];
+
       const insertResult = await pool.query(insertSql, values);
       user = insertResult.rows[0];
     }
@@ -606,15 +617,12 @@ router.post("/kakao/app-login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    console.log(" [KAKAO APP LOGIN] JWT_SECRET used =", process.env.JWT_SECRET);
-    console.log(" [KAKAO APP LOGIN] generated token =", token);
-
     return res.json({
       success: true,
       message: "카카오 로그인 성공",
       token,
       user,
-      isNewUser, 
+      isNewUser,
     });
 
   } catch (err) {
