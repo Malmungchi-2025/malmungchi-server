@@ -490,6 +490,11 @@ router.get("/kakao/callback", async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    console.log(" [KAKAO APP LOGIN] JWT_SECRET used =", process.env.JWT_SECRET);
+    console.log(" [KAKAO APP LOGIN] generated token =", token);
+
+    
+
     
     // 웹 / 앱(안드로이드) 분기 처리
    
@@ -600,6 +605,9 @@ router.post("/kakao/app-login", async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
+
+    console.log(" [KAKAO APP LOGIN] JWT_SECRET used =", process.env.JWT_SECRET);
+    console.log(" [KAKAO APP LOGIN] generated token =", token);
 
     return res.json({
       success: true,
