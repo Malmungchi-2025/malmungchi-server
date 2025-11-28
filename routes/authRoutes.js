@@ -552,7 +552,7 @@ router.get("/kakao/callback", async (req, res) => {
  *         description: 로그인 성공
  */
 router.post("/kakao/app-login", async (req, res) => {
-  const { accessToken } = req.body;
+  const { accessToken, nickname: clientNickname, profileImage: clientProfileImage } = req.body;
 
   if (!accessToken) {
     return res.status(400).json({ success: false, message: "accessToken 필요" });
