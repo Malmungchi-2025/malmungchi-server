@@ -82,7 +82,8 @@ app.use("/api/prompts", webPromptRoutes);
 app.use("/api/grammar", webGrammarRoutes);
 app.use("/api/writings", webWritingRoutes);
 app.use("/api/copy-items", webCopyItemRoutes);
-app.use("/api/auth", webAuthRoutes);
+//  라우트 이름 변경 (예원)
+app.use("/api/web-auth", webAuthRoutes);
 app.use("/api/transcriptions", webTranscriptionRoutes);
 app.use("/api/likes", webLikeRoutes);
 app.use("/api/scraps", webScrapRoutes);

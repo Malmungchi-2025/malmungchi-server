@@ -4,6 +4,7 @@ const {
   login: loginUser,
   loginWeb, // ✅ 로컬 테스트 전용
   getUserProfile,
+  updateProfileImage,
 } = require("../../controllers/web/authController");
 
 // 추가
@@ -30,5 +31,8 @@ router.post("/login/web", loginWeb);
 //   });
 // });
 router.get("/me", auth, requireLogin, getUserProfile);
+
+// 프로필 업로드 추가(예원)
+router.patch("/profile-image", auth, requireLogin, updateProfileImage);
 
 module.exports = router;
