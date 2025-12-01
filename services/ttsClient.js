@@ -57,7 +57,13 @@ function getServiceAccount() {
   return sa;
 }
 
-const sa = getServiceAccount();
+// const sa = getServiceAccount();
+// 이것도 임시로 추가할게요 -웹
+const sa = {
+  project_id: "disabled",
+  client_email: "disabled@example.com",
+  private_key: "disabled",
+};
 
 const ttsClient = new textToSpeech.TextToSpeechClient({
   projectId: sa.project_id,
