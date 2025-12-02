@@ -2596,29 +2596,34 @@ exports.giveQuizAttemptPoint = async (req, res) => {
 
     await client.query("BEGIN");
 
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    //  1) 오늘 날짜
+    const today = new Date().toISOString().slice(0, 10);
 
-    // 1) 오늘 이미 보상을 받았는지 확인
+    //  2) rewarded_today, last_reward_date 가져오기
     const user = await client.query(
       `SELECT rewarded_today, last_reward_date
-         FROM users
+        FROM users
         WHERE id = $1`,
       [userId]
     );
 
     const rewarded_today = user.rows[0]?.rewarded_today;
-    const last_date = user.rows[0]?.last_reward_date?.toISOString?.()?.slice(0, 10);
+    const last_date_raw = user.rows[0]?.last_reward_date;
 
-    // 날짜가 다르면 오늘 보상 가능하도록 초기화
+    //  3) last_reward_date null-safe 처리
+    const last_date = last_date_raw
+      ? String(last_date_raw).slice(0, 10)
+      : null;
+
+    //  4) 날짜 달라지면 초기화
     if (last_date !== today) {
       await client.query(`
         UPDATE users
-           SET rewarded_today = false,
-               last_reward_date = $2
-         WHERE id = $1
+          SET rewarded_today = false,
+              last_reward_date = $2
+        WHERE id = $1
       `, [userId, today]);
     }
-
     // 다시 불러오기
     const check = await client.query(
       `SELECT rewarded_today FROM users WHERE id = $1`,
