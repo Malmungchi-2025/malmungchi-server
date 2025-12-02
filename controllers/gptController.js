@@ -2596,63 +2596,60 @@ exports.giveQuizAttemptPoint = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Advisory Lock
-    const todayKey = Number(
-      new Date().toISOString().slice(0, 10).replaceAll("-", "")
-    );
-    await client.query(
-      "SELECT pg_advisory_xact_lock($1, $2)",
-      [Number(userId), todayKey]
-    );
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-    // 오늘 이미 퀴즈 보상 받았는지 확인 (point_history 없이)
-    const already = await client.query(
-      `
-      SELECT rewarded_today
-        FROM users
-       WHERE id = $1
-      `,
+    // 1) 오늘 이미 보상을 받았는지 확인
+    const user = await client.query(
+      `SELECT rewarded_today, last_reward_date
+         FROM users
+        WHERE id = $1`,
       [userId]
     );
-    
-    // 이 컬럼이 없어도 무시됨 → 그냥 넘어가게 만들어줄 수도 있음
-    // 안전하게 rewarded_today 컬럼도 없이 진행
 
-    // batch 존재 확인
+    const rewarded_today = user.rows[0]?.rewarded_today;
+    const last_date = user.rows[0]?.last_reward_date?.toISOString?.()?.slice(0, 10);
+
+    // 날짜가 다르면 오늘 보상 가능하도록 초기화
+    if (last_date !== today) {
+      await client.query(`
+        UPDATE users
+           SET rewarded_today = false,
+               last_reward_date = $2
+         WHERE id = $1
+      `, [userId, today]);
+    }
+
+    // 다시 불러오기
+    const check = await client.query(
+      `SELECT rewarded_today FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (check.rows[0].rewarded_today === true) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ success: false, message: "오늘은 이미 보상을 받았습니다." });
+    }
+
+    // 2) batch 존재 확인
     const ownBatch = await client.query(
-      `
-      SELECT 1 FROM quiz_batch
-       WHERE id = $1 AND user_id = $2
-       LIMIT 1
-      `,
+      `SELECT 1 FROM quiz_batch WHERE id = $1 AND user_id = $2 LIMIT 1`,
       [attemptId, userId]
     );
 
     if (ownBatch.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.status(404).json({
-        success: false,
-        message: "해당 퀴즈 세트를 찾을 수 없습니다."
-      });
+      return res.status(404).json({ success: false, message: "해당 퀴즈 세트를 찾을 수 없습니다." });
     }
 
-    // 채점 데이터
+    // 3) 채점
     const resp = await client.query(
-      `
-      SELECT is_correct
-        FROM quiz_response
-       WHERE user_id = $1
-         AND batch_id = $2
-      `,
+      `SELECT is_correct FROM quiz_response WHERE user_id = $1 AND batch_id = $2`,
       [userId, attemptId]
     );
 
     if (resp.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "퀴즈를 모두 완료하지 않았습니다."
-      });
+      return res.status(400).json({ success: false, message: "퀴즈를 모두 완료하지 않았습니다." });
     }
 
     const total = resp.rowCount;
@@ -2661,16 +2658,16 @@ exports.giveQuizAttemptPoint = async (req, res) => {
 
     const reward = BASE_POINT + (allCorrect ? BONUS_ALL_CORRECT : 0);
 
-    // 포인트 지급
+    // 4) 포인트 지급
     const updateUser = await client.query(
-      `
-      UPDATE users
-         SET point = COALESCE(point, 0) + $2,
-             updated_at = now()
-       WHERE id = $1
-       RETURNING point
-      `,
-      [userId, reward]
+      `UPDATE users
+          SET point = COALESCE(point, 0) + $2,
+              rewarded_today = true,
+              last_reward_date = $3,
+              updated_at = now()
+        WHERE id = $1
+     RETURNING point`,
+      [userId, reward, today]
     );
 
     await client.query("COMMIT");
