@@ -11,6 +11,7 @@ async function auth(req, _res, next) {
         "SELECT id, email, name, nickname, is_verified FROM users WHERE id=$1",
         [payload.id]
       );
+
       if (rows[0]) {
         req.user = {
           id: rows[0].id,

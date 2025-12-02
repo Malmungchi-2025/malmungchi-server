@@ -43,8 +43,30 @@ app.use((req, res, next) => {
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 
-const { auth } = require("./middlewares/auth");
-app.use(auth); // ← 모든 라우트 전에 토큰 파싱/유저 주입
+// 기존 코드 주석 처리
+// const { auth } = require("./middlewares/auth");
+// app.use(auth);
+// ← 모든 라우트 전에 토큰 파싱/유저 주입
+
+// 여기를 수정 진행하였습니다. 기존에는 앱 미들워어만 적용되어서 경로에 따라 분기하여 저장되도록 했습니다 !
+const { auth: appAuth } = require("./middlewares/auth");
+const { auth: webAuth } = require("./utils/authMiddleware_web");
+
+app.use((req, res, next) => {
+  const path = req.path;
+
+  if (path.startsWith("/api/auth") || path.startsWith("/api/friends")) {
+    return appAuth(req, res, next); // 앱 인증
+  }
+
+  if (path.startsWith("/api/web-auth") || path.startsWith("/api/writings")) {
+    return webAuth(req, res, next); // 웹 인증
+  }
+
+  next();
+});
+
+// 여기까지 수정
 
 app.get("/", (req, res) => res.send("🚀 Malmungchi Server is running..."));
 
@@ -82,7 +104,8 @@ app.use("/api/prompts", webPromptRoutes);
 app.use("/api/grammar", webGrammarRoutes);
 app.use("/api/writings", webWritingRoutes);
 app.use("/api/copy-items", webCopyItemRoutes);
-app.use("/api/auth", webAuthRoutes);
+//  라우트 이름 변경 (예원)
+app.use("/api/web-auth", webAuthRoutes);
 app.use("/api/transcriptions", webTranscriptionRoutes);
 app.use("/api/likes", webLikeRoutes);
 app.use("/api/scraps", webScrapRoutes);

@@ -129,9 +129,9 @@ exports.getUserProfile = async (req, res) => {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
     const r = await pool.query(
-      `SELECT id, email, name, nickname, point
-       FROM users
-       WHERE id = $1`,
+      `SELECT id, email, name, nickname, point, profile_image, level
+   FROM users
+   WHERE id = $1`,
       [payload.id]
     );
 
@@ -148,4 +148,17 @@ exports.getUserProfile = async (req, res) => {
     console.error("getUserProfile error:", e);
     res.status(401).json({ success: false, message: "토큰 검증 실패" });
   }
+};
+
+// 프로필 업로드 추가 (예원)
+exports.updateProfileImage = async (req, res) => {
+  const { profileImage } = req.body;
+  const userId = req.user.id;
+
+  await pool.query(`UPDATE users SET profile_image = $1 WHERE id = $2`, [
+    profileImage,
+    userId,
+  ]);
+
+  res.json({ success: true });
 };
