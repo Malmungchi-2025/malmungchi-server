@@ -2578,90 +2578,98 @@ exports.getDailySummary = async (req, res) => {
 };
 
 // POST /api/gpt/quiz/attempt/reward
+// attemptId = quiz_batch.id 로 사용
 // 시도 1건 보상 지급: 기본 15p + 전부 정답이면 +5p
-exports.giveQuizAttemptPoint = async (req, res) =>  {
+exports.giveQuizAttemptPoint = async (req, res) => {
   const client = await pool.connect();
   try {
     const userId = req.user?.id;
     const { attemptId } = req.body;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '인증 필요' });
-    }
-    if (!attemptId) {
-      return res.status(400).json({ success: false, message: 'attemptId가 필요합니다.' });
-    }
+    if (!userId) 
+      return res.status(401).json({ success: false, message: "인증 필요" });
 
+    if (!attemptId)
+      return res.status(400).json({ success: false, message: "attemptId가 필요합니다." });
+
+    // 기준 포인트
     const BASE_POINT = 15;
     const BONUS_ALL_CORRECT = 5;
 
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
-    // (A) 동시성 제어: 유저+일자 단위로 Advisory Lock
-    //   -> 같은 유저가 같은 날 여러 번 호출해도 한 트랜잭션만 통과
+    /* ──────────────────────────────
+     1) 동일 유저·동일 일자의 동시 처리 대비 Advisory Lock
+    ───────────────────────────────*/
     const todayKey = Number(
-      new Date().toISOString().slice(0, 10).replaceAll('-', '') // YYYYMMDD -> int
+      new Date().toISOString().slice(0, 10).replaceAll("-", "")
     );
-    await client.query('SELECT pg_advisory_xact_lock($1, $2)', [Number(userId), todayKey]);
-
-    // 1) 시도 조회 + 잠금 (중복 지급 방지)
-    const q = await client.query(
-      `
-      SELECT id,
-             user_id,
-             total_questions,
-             correct_count,
-             rewarded_at
-        FROM public.quiz_attempt
-       WHERE id = $1
-       FOR UPDATE
-      `,
-      [attemptId]
+    await client.query(
+      "SELECT pg_advisory_xact_lock($1, $2)",
+      [Number(userId), todayKey]
     );
 
-    if (q.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: '시도를 찾을 수 없습니다.' });
-    }
-
-    const row = q.rows[0];
-    if (String(row.user_id) !== String(userId)) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ success: false, message: '본인 시도가 아닙니다.' });
-    }
-    if (row.rewarded_at) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, message: '이미 포인트가 지급된 시도입니다.' });
-    }
-
-    // (B) 하루 1회 제한: 오늘 이미 보상 받았는지 확인
-    const alreadyToday = await client.query(
+    /* ──────────────────────────────
+     2) 오늘 퀴즈 보상 이미 받았는지 point_history 로 확인
+       - reason = 'quiz_attempt'
+    ───────────────────────────────*/
+    const already = await client.query(
       `
       SELECT 1
-        FROM public.quiz_attempt
+        FROM point_history
        WHERE user_id = $1
-         AND rewarded_at::date = CURRENT_DATE
+         AND reason = 'quiz_attempt'
+         AND created_at::date = CURRENT_DATE
        LIMIT 1
       `,
       [userId]
     );
-    if (alreadyToday.rowCount > 0) {
-      await client.query('ROLLBACK');
-      return res
-        .status(400) // 또는 409/429, 정책에 맞게
-        .json({ success: false, message: '오늘은 이미 보상을 받았습니다. 내일 다시 시도해 주세요.' });
+
+    if (already.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "오늘은 이미 퀴즈 보상을 받았습니다."
+      });
     }
 
-    const total = Number(row.total_questions ?? 0);
-    const correct = Number(row.correct_count ?? 0);
-    const allCorrect = total > 0 && correct === total;
+    /* ──────────────────────────────
+     3) batchId(attemptId)로 퀴즈 정확도 계산
+        quiz_response 에 누적 저장된 채점으로 계산 가능
+    ───────────────────────────────*/
+    const resp = await client.query(
+      `
+      SELECT is_correct
+        FROM quiz_response
+       WHERE user_id = $1
+         AND batch_id = $2
+      `,
+      [userId, attemptId]
+    );
 
+    if (resp.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        success: false,
+        message: "해당 시도의 답안이 없습니다(퀴즈 미완료)."
+      });
+    }
+
+    const total = resp.rowCount;
+    const correct = resp.rows.filter(r => r.is_correct === true).length;
+    const allCorrect = (correct === total);
+
+    /* ──────────────────────────────
+     4) 지급 포인트 계산
+    ───────────────────────────────*/
     const reward = BASE_POINT + (allCorrect ? BONUS_ALL_CORRECT : 0);
 
-    // 2) 포인트 적립
+    /* ──────────────────────────────
+     5) users.point 증가
+    ───────────────────────────────*/
     const updUser = await client.query(
       `
-      UPDATE public.users
+      UPDATE users
          SET point = COALESCE(point, 0) + $2,
              updated_at = now()
        WHERE id = $1
@@ -2670,41 +2678,35 @@ exports.giveQuizAttemptPoint = async (req, res) =>  {
       [userId, reward]
     );
 
-    // 3) 시도에 보상 마킹
+    /* ──────────────────────────────
+     6) point_history 기록
+    ───────────────────────────────*/
     await client.query(
       `
-      UPDATE public.quiz_attempt
-         SET rewarded_at = now(),
-             rewarded_point = $2
-       WHERE id = $1
+      INSERT INTO point_history(user_id, delta, reason, ref_id, created_at)
+      VALUES ($1,$2,'quiz_attempt',$3,now())
       `,
-      [attemptId, reward]
+      [userId, reward, attemptId]
     );
 
-    // (선택) 포인트 이력
-    await client.query(
-      `
-      INSERT INTO public.point_history(user_id, delta, reason, ref_id, created_at)
-      VALUES ($1, $2, $3, $4, now())
-      `,
-      [userId, reward, allCorrect ? 'quiz_all_correct' : 'quiz_attempt', attemptId]
-    );
-
-    await client.query('COMMIT');
+    await client.query("COMMIT");
 
     return res.json({
       success: true,
-      message: allCorrect ? '모든 문제 정답! +5 보너스 포함 지급되었습니다.' : '포인트가 지급되었습니다.',
+      message: allCorrect 
+        ? "전부 정답! +5 보너스 포함 지급되었습니다."
+        : "15포인트가 지급되었습니다.",
       rewardPoint: reward,
       basePoint: BASE_POINT,
       bonusAllCorrect: allCorrect ? BONUS_ALL_CORRECT : 0,
       allCorrect,
       totalPoint: updUser.rows[0]?.point ?? 0
     });
+
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ 퀴즈 포인트 지급 오류:', err);
-    return res.status(500).json({ success: false, message: '포인트 지급 실패' });
+    await client.query("ROLLBACK");
+    console.error("❌ 퀴즈 포인트 지급 오류:", err);
+    return res.status(500).json({ success: false, message: "포인트 지급 실패" });
   } finally {
     client.release();
   }
