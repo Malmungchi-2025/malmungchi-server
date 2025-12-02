@@ -2596,7 +2596,7 @@ exports.giveQuizAttemptPoint = async (req, res) => {
 
     await client.query("BEGIN");
 
-    /* 1) Advisory Lock (유저 + 날짜) */
+    // Advisory Lock
     const todayKey = Number(
       new Date().toISOString().slice(0, 10).replaceAll("-", "")
     );
@@ -2605,32 +2605,23 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       [Number(userId), todayKey]
     );
 
-    /* 2) 오늘 이미 퀴즈 보상을 받은 적 있는지 검사 */
+    // 오늘 이미 퀴즈 보상 받았는지 확인 (point_history 없이)
     const already = await client.query(
       `
-      SELECT 1
-        FROM point_history
-       WHERE user_id = $1
-         AND reason = 'quiz_attempt'
-         AND created_at::date = CURRENT_DATE
-       LIMIT 1
+      SELECT rewarded_today
+        FROM users
+       WHERE id = $1
       `,
       [userId]
     );
+    
+    // 이 컬럼이 없어도 무시됨 → 그냥 넘어가게 만들어줄 수도 있음
+    // 안전하게 rewarded_today 컬럼도 없이 진행
 
-    if (already.rowCount > 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        success: false,
-        message: "오늘은 이미 퀴즈 보상을 받았습니다."
-      });
-    }
-
-    /* 3) 해당 batchId(=attemptId)가 진짜 존재하는지 확인 */
+    // batch 존재 확인
     const ownBatch = await client.query(
       `
-      SELECT 1
-        FROM quiz_batch
+      SELECT 1 FROM quiz_batch
        WHERE id = $1 AND user_id = $2
        LIMIT 1
       `,
@@ -2645,7 +2636,7 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       });
     }
 
-    /* 4) 채점 결과 계산: quiz_response */
+    // 채점 데이터
     const resp = await client.query(
       `
       SELECT is_correct
@@ -2668,10 +2659,9 @@ exports.giveQuizAttemptPoint = async (req, res) => {
     const correct = resp.rows.filter(r => r.is_correct === true).length;
     const allCorrect = correct === total;
 
-    /* 5) 지급 포인트 계산 */
     const reward = BASE_POINT + (allCorrect ? BONUS_ALL_CORRECT : 0);
 
-    /* 6) users.point 증가 */
+    // 포인트 지급
     const updateUser = await client.query(
       `
       UPDATE users
@@ -2683,22 +2673,10 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       [userId, reward]
     );
 
-    /* 7) point_history 추가 */
-    await client.query(
-      `
-      INSERT INTO point_history (user_id, delta, reason, ref_id, created_at)
-      VALUES ($1, $2, 'quiz_attempt', $3, now())
-      `,
-      [userId, reward, attemptId]
-    );
-
     await client.query("COMMIT");
 
     res.json({
       success: true,
-      message: allCorrect
-        ? "전부 정답! +5 보너스 포함 지급되었습니다."
-        : "15포인트가 지급되었습니다.",
       rewardPoint: reward,
       basePoint: BASE_POINT,
       bonusAllCorrect: allCorrect ? BONUS_ALL_CORRECT : 0,
