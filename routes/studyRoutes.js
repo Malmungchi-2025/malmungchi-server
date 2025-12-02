@@ -101,7 +101,7 @@
  * /api/study/progress:
  *   patch:
  *     summary: 학습 단계 업데이트
- *     description: 사용자의 학습 단계(예: 1단계 → 2단계)를 업데이트합니다.
+ *     description: "사용자의 학습 단계(예: 1단계 → 2단계)를 업데이트합니다."
  *     tags: [Study]
  *     security:
  *       - bearerAuth: []
