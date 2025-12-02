@@ -2597,7 +2597,9 @@ exports.giveQuizAttemptPoint = async (req, res) => {
     await client.query("BEGIN");
 
     //  1) 오늘 날짜
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date(Date.now() + 9 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     //  2) rewarded_today, last_reward_date 가져오기
     const user = await client.query(
