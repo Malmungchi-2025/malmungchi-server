@@ -2586,21 +2586,17 @@ exports.giveQuizAttemptPoint = async (req, res) => {
     const userId = req.user?.id;
     const { attemptId } = req.body;
 
-    if (!userId) 
+    if (!userId)
       return res.status(401).json({ success: false, message: "인증 필요" });
-
     if (!attemptId)
       return res.status(400).json({ success: false, message: "attemptId가 필요합니다." });
 
-    // 기준 포인트
     const BASE_POINT = 15;
     const BONUS_ALL_CORRECT = 5;
 
     await client.query("BEGIN");
 
-    /* ──────────────────────────────
-     1) 동일 유저·동일 일자의 동시 처리 대비 Advisory Lock
-    ───────────────────────────────*/
+    /* 1) Advisory Lock (유저 + 날짜) */
     const todayKey = Number(
       new Date().toISOString().slice(0, 10).replaceAll("-", "")
     );
@@ -2609,10 +2605,7 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       [Number(userId), todayKey]
     );
 
-    /* ──────────────────────────────
-     2) 오늘 퀴즈 보상 이미 받았는지 point_history 로 확인
-       - reason = 'quiz_attempt'
-    ───────────────────────────────*/
+    /* 2) 오늘 이미 퀴즈 보상을 받은 적 있는지 검사 */
     const already = await client.query(
       `
       SELECT 1
@@ -2633,10 +2626,26 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       });
     }
 
-    /* ──────────────────────────────
-     3) batchId(attemptId)로 퀴즈 정확도 계산
-        quiz_response 에 누적 저장된 채점으로 계산 가능
-    ───────────────────────────────*/
+    /* 3) 해당 batchId(=attemptId)가 진짜 존재하는지 확인 */
+    const ownBatch = await client.query(
+      `
+      SELECT 1
+        FROM quiz_batch
+       WHERE id = $1 AND user_id = $2
+       LIMIT 1
+      `,
+      [attemptId, userId]
+    );
+
+    if (ownBatch.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        success: false,
+        message: "해당 퀴즈 세트를 찾을 수 없습니다."
+      });
+    }
+
+    /* 4) 채점 결과 계산: quiz_response */
     const resp = await client.query(
       `
       SELECT is_correct
@@ -2649,25 +2658,21 @@ exports.giveQuizAttemptPoint = async (req, res) => {
 
     if (resp.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
-        message: "해당 시도의 답안이 없습니다(퀴즈 미완료)."
+        message: "퀴즈를 모두 완료하지 않았습니다."
       });
     }
 
     const total = resp.rowCount;
     const correct = resp.rows.filter(r => r.is_correct === true).length;
-    const allCorrect = (correct === total);
+    const allCorrect = correct === total;
 
-    /* ──────────────────────────────
-     4) 지급 포인트 계산
-    ───────────────────────────────*/
+    /* 5) 지급 포인트 계산 */
     const reward = BASE_POINT + (allCorrect ? BONUS_ALL_CORRECT : 0);
 
-    /* ──────────────────────────────
-     5) users.point 증가
-    ───────────────────────────────*/
-    const updUser = await client.query(
+    /* 6) users.point 증가 */
+    const updateUser = await client.query(
       `
       UPDATE users
          SET point = COALESCE(point, 0) + $2,
@@ -2678,35 +2683,33 @@ exports.giveQuizAttemptPoint = async (req, res) => {
       [userId, reward]
     );
 
-    /* ──────────────────────────────
-     6) point_history 기록
-    ───────────────────────────────*/
+    /* 7) point_history 추가 */
     await client.query(
       `
-      INSERT INTO point_history(user_id, delta, reason, ref_id, created_at)
-      VALUES ($1,$2,'quiz_attempt',$3,now())
+      INSERT INTO point_history (user_id, delta, reason, ref_id, created_at)
+      VALUES ($1, $2, 'quiz_attempt', $3, now())
       `,
       [userId, reward, attemptId]
     );
 
     await client.query("COMMIT");
 
-    return res.json({
+    res.json({
       success: true,
-      message: allCorrect 
+      message: allCorrect
         ? "전부 정답! +5 보너스 포함 지급되었습니다."
         : "15포인트가 지급되었습니다.",
       rewardPoint: reward,
       basePoint: BASE_POINT,
       bonusAllCorrect: allCorrect ? BONUS_ALL_CORRECT : 0,
       allCorrect,
-      totalPoint: updUser.rows[0]?.point ?? 0
+      totalPoint: updateUser.rows[0]?.point ?? 0
     });
 
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ 퀴즈 포인트 지급 오류:", err);
-    return res.status(500).json({ success: false, message: "포인트 지급 실패" });
+    res.status(500).json({ success: false, message: "포인트 지급 실패" });
   } finally {
     client.release();
   }
