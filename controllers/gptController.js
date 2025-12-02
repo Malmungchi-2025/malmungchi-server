@@ -2597,14 +2597,17 @@ exports.giveQuizAttemptPoint = async (req, res) => {
     await client.query("BEGIN");
 
     //  1) 오늘 날짜
-    const today = new Date().toLocaleDateString("ko-KR", {
+    const now = new Date();
+    const today = new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     })
-      .replace(/\./g, '-')
+      .format(now)
+      .replace(/\./g, '')
       .replace(/\s/g, '')
-      .split('-')
-      .map(v => v.padStart(2, '0'))   // 월/일 2자리 패딩
-      .join('-');
+      .replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
 
     //  2) rewarded_today, last_reward_date 가져오기
     const user = await client.query(
@@ -2618,9 +2621,7 @@ exports.giveQuizAttemptPoint = async (req, res) => {
     const last_date_raw = user.rows[0]?.last_reward_date;
 
     //  3) last_reward_date null-safe 처리
-    const last_date = last_date_raw
-      ? String(last_date_raw).slice(0, 10)
-      : null;
+    const last_date = last_date_raw ?? null;
 
     //  4) 날짜 달라지면 초기화
     if (last_date !== today) {
