@@ -49,10 +49,15 @@ exports.getWritingsByPrompt = async (req, res) => {
          w.created_at,
          w.is_published,
          w.custom_color AS color,
-         COALESCE(u.name, '익명') AS author
+         COALESCE(u.name, '익명') AS author,
+         COUNT(DISTINCT l.id) AS likes,
+         COUNT(DISTINCT s.id) AS scraps
        FROM writings w
        LEFT JOIN users u ON w.user_id = u.id
+       LEFT JOIN likes l ON w.id = l.writing_id
+       LEFT JOIN scraps s ON w.id = s.writing_id
        WHERE w.prompt_id = $1 AND w.is_published = true
+       GROUP BY w.id, w.title, w.content, w.created_at, w.is_published, w.custom_color, u.name
        ORDER BY w.created_at DESC`,
       [promptId]
     );

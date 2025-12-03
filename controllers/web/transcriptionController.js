@@ -78,7 +78,7 @@ const getTranscriptionById = async (req, res) => {
         t.id,
         COALESCE(t.custom_title, c.title) AS title,
         CASE 
-          WHEN t.type = 'custom' THEN '사용자 지정'  
+          WHEN t.type = 'custom' THEN '사용자'  
           ELSE c.author                              
         END AS author,
         t.typed_content AS content
