@@ -102,8 +102,30 @@ const getTranscriptionById = async (req, res) => {
   }
 };
 
+// 포인트 누적 저장
+const addUserPoints = async (req, res) => {
+  const userId = req.user.id;
+  const { point } = req.body;
+
+  if (!point || typeof point !== "number") {
+    return res.status(400).json({ message: "유효한 포인트 값이 필요합니다." });
+  }
+
+  try {
+    await pool.query(`UPDATE users SET point = point + $1 WHERE id = $2`, [
+      point,
+      userId,
+    ]);
+    res.status(200).json({ message: "포인트가 누적되었습니다.", added: point });
+  } catch (err) {
+    console.error("❌ addUserPoints error:", err);
+    res.status(500).json({ message: "포인트 업데이트 실패" });
+  }
+};
+
 module.exports = {
   createTranscription,
   getMyTranscriptions,
   getTranscriptionById,
+  addUserPoints,
 };
