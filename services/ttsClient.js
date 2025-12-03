@@ -57,8 +57,7 @@ function getServiceAccount() {
   return sa;
 }
 
-// const sa = getServiceAccount();
-// 이것도 임시로 추가할게요 -웹 - 
+// 이것도 임시로 추가할게요 -웹 -
 //미안해요. 이것 때문에.. ai 대화가 깨져버려서 이건 다시 주석 칠게요 -앱-
 //
 // const sa = {

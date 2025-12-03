@@ -21,8 +21,5 @@ router.post("/:writingId", requireLogin, addScrap);
 
 // ✅ 스크랩 취소
 router.delete("/:writingId", requireLogin, removeScrap);
-// router.post("/:writingId", requireLogin, addScrap);
-// router.delete("/:writingId", requireLogin, removeScrap);
-// router.get("/:writingId", requireLogin, checkScrap);
 
 module.exports = router;
