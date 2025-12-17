@@ -198,7 +198,7 @@ router.get('/daily/hello', dailyVoiceHello);
 router.post('/daily/chat', upload.single('audio'), dailyVoiceChat);
 
 // 텍스트 only GPT (job)
-router.post('/chat-text', voiceChatText);
+// router.post('/chat-text', voiceChatText);
 
 // 텍스트 only GPT (자유대화)
 router.post('/daily/chat-text', dailyVoiceChatText);
