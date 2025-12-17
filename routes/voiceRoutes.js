@@ -18,8 +18,8 @@ const {
   getDailyVoicePrompt,
   dailyVoiceHello,
   dailyVoiceChat,
-  voiceChatText,
-  dailyVoiceChatText 
+  // voiceChatText,
+  // dailyVoiceChatText 
 } = require('../controllers/voiceController');
 
 const router = express.Router();
@@ -201,6 +201,6 @@ router.post('/daily/chat', upload.single('audio'), dailyVoiceChat);
 // router.post('/chat-text', voiceChatText);
 
 // 텍스트 only GPT (자유대화)
-router.post('/daily/chat-text', dailyVoiceChatText);
+// router.post('/daily/chat-text', dailyVoiceChatText);
 
 module.exports = router;
