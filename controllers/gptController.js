@@ -2335,41 +2335,41 @@ exports.createOrGetBatch = async (req, res) => {
       items = await ensureExplanations(items);
 
       //임시 정답 위치 고정 -> 추후 꼭 삭제!!!!! 아직은 QA 및, 기말 발표로 부득이하게 정답 위치 고정함.
-      const mcqPattern = [4, 2, 1];
-      let mcqCount = 0;
-      let oxCount = 0;
+      // const mcqPattern = [4, 2, 1];
+      // let mcqCount = 0; //12.18 주석처리함.
+      // let oxCount = 0;
 
-      for (const it of items) {
-        if (it.type === 'MCQ' && Array.isArray(it.options) && it.options.length >= 4) {
-          const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
-          mcqCount++;
+      // for (const it of items) {
+      //   if (it.type === 'MCQ' && Array.isArray(it.options) && it.options.length >= 4) {
+      //     const correctIdx = mcqPattern[mcqCount % mcqPattern.length] - 1; // 0-based
+      //     mcqCount++;
 
-          // 정답 보기를 "id" 기반으로 안전하게 찾아옴
-          console.log('[MCQ before fix]', it.text, it.options.map(o => o.label), '정답ID:', it.correct_option_id);
+      //     // 정답 보기를 "id" 기반으로 안전하게 찾아옴
+      //     console.log('[MCQ before fix]', it.text, it.options.map(o => o.label), '정답ID:', it.correct_option_id);
 
-          // 정답 ID가 null/non-number 이면 4번으로 강제
-          let cid = Number(it.correct_option_id);
-          if (!cid || cid < 1 || cid > it.options.length) cid = 4;
+      //     // 정답 ID가 null/non-number 이면 4번으로 강제
+      //     let cid = Number(it.correct_option_id);
+      //     if (!cid || cid < 1 || cid > it.options.length) cid = 4;
 
-          const correct = it.options[cid - 1];
-          const others = it.options.filter((_, i) => i !== cid - 1);
+      //     const correct = it.options[cid - 1];
+      //     const others = it.options.filter((_, i) => i !== cid - 1);
 
-          const fixedOptions = [...others];
-          fixedOptions.splice(correctIdx, 0, correct);
+      //     const fixedOptions = [...others];
+      //     fixedOptions.splice(correctIdx, 0, correct);
 
-          // 보기 ID 다시 1~n으로 재부여 (정렬 후 혼선 방지)
-          it.options = fixedOptions.map((o, i) => ({ id: i + 1, label: o.label }));
-          it.correct_option_id = correctIdx + 1;
+      //     // 보기 ID 다시 1~n으로 재부여 (정렬 후 혼선 방지)
+      //     it.options = fixedOptions.map((o, i) => ({ id: i + 1, label: o.label }));
+      //     it.correct_option_id = correctIdx + 1;
 
-          console.log('[MCQ after fix]', it.text, it.options.map(o => o.label), '최종 정답:', it.correct_option_id)
-                  }
+      //     console.log('[MCQ after fix]', it.text, it.options.map(o => o.label), '최종 정답:', it.correct_option_id)
+      //             }
 
-        // OX 순서 고정: 첫 번째 O, 두 번째 X
-        else if (it.type === 'OX') {
-          it.answer_is_o = (oxCount % 2 === 0);
-          oxCount++;
-        }
-      }  
+      //   // OX 순서 고정: 첫 번째 O, 두 번째 X
+      //   else if (it.type === 'OX') {
+      //     it.answer_is_o = (oxCount % 2 === 0);
+      //     oxCount++;
+      //   }
+      // }  
 
     // 2) 항상 새 배치 생성
     const ins = await client.query(
