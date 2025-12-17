@@ -469,7 +469,7 @@ exports.generateQuote = async (req, res) => {
           { role: 'system', content: sys.content },
           { role: 'user', content: combinedPrompt } 
         ],
-        { temperature: attempt < 1 ? 0.8 : 0.9, max_tokens: 1500, label: 'generateQuote' }
+        { temperature: attempt < 1 ? 0.8 : 0.9, max_tokens: 900, label: 'generateQuote' }
       );
 
       //기존 gpt api호출 입니다! -> 퍼플렉시티도 별로면....이걸 살려야...
@@ -524,7 +524,11 @@ exports.generateQuote = async (req, res) => {
       generatedText = generatedText.replace(/\s{2,}/g, " ").trim();
 
       //  여기가 핵심: 난이도 통과했으면 break
-      if (checkDifficulty(generatedText)) break;
+      const ok = checkDifficulty(generatedText);
+      if (!ok) {
+        console.warn('난이도 미달, 그래도 사용');
+      }
+      //if (checkDifficulty(generatedText)) break;
 
       // 마지막 시도면 그래도 최소한의 정리
       if (attempt === 2) {
@@ -544,9 +548,17 @@ exports.generateQuote = async (req, res) => {
     );
     const studyId = upsert.rows[0].study_id;
 
-    // ────────── 단어 추출 저장 ──────────
-    await saveVocabulary(studyId, generatedText);
+    // // ────────── 단어 추출 저장 ──────────
+    // await saveVocabulary(studyId, generatedText);
 
+
+    //단어 추출 백그라운드
+    setImmediate(() => {
+      saveVocabulary(studyId, generatedText)
+        .catch(err =>
+          console.error('단어 저장 백그라운드 실패:', err.message)
+        );
+    });
     return res.json({ success: true, result: generatedText, studyId, level: userLevel });
   } catch (err) {
     console.error(err);
