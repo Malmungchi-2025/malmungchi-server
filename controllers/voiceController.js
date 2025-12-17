@@ -209,18 +209,37 @@ exports.voiceHello = async (req, res) => {
   try {
     const mode = 'job';
 
-    // 🔒 발표용 고정 질문 -> 부득이하게 발표 및 QA로 질문 고정함. 이후 주석처리된 것을 살려 원래 기능으로 되돌리기!
-    //-> 12.17 고정 해제함!
-    const starter = pickJobStarter(); // ← 랜덤 호출 주석처리
-    // const starter = {
-    //   situation: '면접 상황',
-    //   question: '직장에서 동료와 의견이 충돌했을 때, 어떻게 해결했는지 말씀해보세요.'
-    // };
+    // 시스템 프롬프트 (기존 그대로 사용)
+    const systemPrompt = getJobPrompt();
 
-    // 화면표시용 전체 문장(=TTS용)
-    const fullText = `[${starter.situation}]\n: ${starter.question}`;
+    // "첫 질문 생성" 전용 유저 프롬프트
+    const firstTurnPrompt = `
+지금은 대화를 시작하는 단계다.
+취업 준비와 관련된 현실적인 상황 하나를 선택하고,
+사용자가 바로 답할 수 있도록 질문 하나를 던져라.
 
-    // TTS
+반드시 아래 형식으로만 출력하라:
+
+[상황]
+: 질문
+
+설명, JSON, 추가 문장 없이 질문만 출력하라.
+`;
+
+    const gpt = await oa.post('/chat/completions', {
+      model: GPT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: firstTurnPrompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 200
+    });
+
+    // GPT가 만든 첫 질문
+    const fullText = gpt.data.choices[0].message.content.trim();
+
+    // TTS 
     const [ttsResp] = await ttsClient.synthesizeSpeech({
       input: { text: fullText },
       voice: { languageCode: 'ko-KR', ssmlGender: 'NEUTRAL' },
@@ -228,29 +247,29 @@ exports.voiceHello = async (req, res) => {
     });
     const mp3Buffer = Buffer.from(ttsResp.audioContent);
 
-    // JSON으로 돌려줄 때: 상황/질문/전체문장/오디오 모두 포함
+    // 4응답 
     if (!(req.query.as === 'stream' || (req.get('accept') || '').includes('audio/mpeg'))) {
       return res.json({
         success: true,
         mode,
-        situation: starter.situation,     // 프론트: 태그(칩/작은 말풍선)
-        question:  starter.question,      // 프론트: 큰 말풍선(회색)
-        text:      fullText,              // (필요하면 사용)
+        situation: null,        
+        question: null,         
+        text: fullText,
         audioBase64: mp3Buffer.toString('base64'),
         mimeType: 'audio/mpeg'
       });
     }
 
-    // 스트리밍으로 달라고 하면 오디오만
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', mp3Buffer.length);
     return res.end(mp3Buffer);
 
   } catch (err) {
-    logTtsError('voiceHello', err);
-    return res.status(500).json({ success:false, message:'voiceHello 실패', hint: err?.message });
+    logOpenAiError('voiceHello', err);
+    return res.status(500).json({ success:false, message:'voiceHello 실패' });
   }
-}; //여기 추후 밑에 주석 부분으로 변경하기!
+};
+ //여기 추후 밑에 주석 부분으로 변경하기!
 
 // /* =========================================================
 //  * D. 서버가 먼저 상황+질문 제공 (텍스트+TTS) — 취준생 전용
