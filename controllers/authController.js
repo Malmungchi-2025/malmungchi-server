@@ -651,7 +651,7 @@ exports.saveNicknameTestIntoUsers = async (req, res) => {
       if (vt === '하' && rt === '중') return '감각해석가';
       if (vt === '중' && rt === '상') return '맥락추리자';
       if (vt === '중' && rt === '중') return '언어균형술사';
-      if (vt === '중' && rt === '하') return '낱말며행자';
+      if (vt === '중' && rt === '하') return '낱말여행자';
       if (vt === '상' && rt === '하') return '단어수집가';
       if (vt === '상' && rt === '중') return '의미해석가';
       return '언어모험가';
